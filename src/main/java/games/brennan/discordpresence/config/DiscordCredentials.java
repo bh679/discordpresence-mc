@@ -49,6 +49,11 @@ public final class DiscordCredentials {
         return read(DiscordCredentialsProvider::botToken);
     }
 
+    /** The provider's relay base URL, or {@code ""} when none is registered / it fails. */
+    public static String providerRelayBaseUrl() {
+        return read(DiscordCredentialsProvider::relayBaseUrl);
+    }
+
     /** Snapshot the volatile slot and read one field, mapping null / any throwable to {@code ""}. */
     private static String read(Function<DiscordCredentialsProvider, String> field) {
         DiscordCredentialsProvider current = provider;

@@ -58,4 +58,19 @@ class DiscordCredentialsTest {
         DiscordCredentials.register(null);
         assertEquals("", DiscordCredentials.providerWebhookUrl());
     }
+
+    @Test
+    void provider_suppliesRelayBaseUrl() {
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String relayBaseUrl() { return "https://relay/base"; }
+        });
+        assertEquals("https://relay/base", DiscordCredentials.providerRelayBaseUrl());
+    }
+
+    @Test
+    void relayBaseUrl_defaultsBlankWhenNotOverridden() {
+        DiscordCredentials.register(() -> "https://relay/hook"); // only webhookUrl() overridden
+        assertEquals("", DiscordCredentials.providerRelayBaseUrl());
+    }
 }

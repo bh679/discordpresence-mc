@@ -1,6 +1,10 @@
 package games.brennan.discordpresence.discord;
 
+import games.brennan.discordpresence.config.DiscordPresenceConfig;
+
+import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -40,6 +44,29 @@ final class DiscordHttp {
             .connectTimeout(TIMEOUT)
             .executor(EXECUTOR)
             .build();
+
+    /**
+     * Whether a bot REST call cannot proceed: direct-to-Discord mode with a blank token. In
+     * relay-mode this is always {@code false} — the relay injects the token, so DP needs none.
+     */
+    static boolean botUnavailable() {
+        return !DiscordPresenceConfig.isRelayMode() && DiscordPresenceConfig.getBotToken().isBlank();
+    }
+
+    /**
+     * A request builder for a bot REST call (User-Agent + timeout). Adds the
+     * {@code Authorization: Bot <token>} header only in direct mode; in relay-mode the header is
+     * omitted because the relay holds and injects the token server-side.
+     */
+    static HttpRequest.Builder botRequest(URI uri) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
+                .header("User-Agent", "DiscordPresence-Mod")
+                .timeout(TIMEOUT);
+        if (!DiscordPresenceConfig.isRelayMode()) {
+            builder.header("Authorization", "Bot " + DiscordPresenceConfig.getBotToken());
+        }
+        return builder;
+    }
 
     private DiscordHttp() {}
 }

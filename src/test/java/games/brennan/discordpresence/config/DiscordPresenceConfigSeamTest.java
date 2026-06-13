@@ -4,6 +4,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Verifies the public {@link DiscordPresenceConfig} getters honour a registered
@@ -40,5 +42,33 @@ class DiscordPresenceConfigSeamTest {
         DiscordCredentials.register(() -> "https://relay/hook");
         DiscordCredentials.register(null);
         assertEquals("", DiscordPresenceConfig.getWebhookUrl());
+    }
+
+    @Test
+    void noRelay_botApiBaseIsDiscordDirect() {
+        DiscordCredentials.register(null);
+        assertFalse(DiscordPresenceConfig.isRelayMode());
+        assertEquals("https://discord.com/api/v10", DiscordPresenceConfig.getBotApiBase());
+    }
+
+    @Test
+    void relayMode_derivesHookAndBotBaseFromRelayBase() {
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String relayBaseUrl() { return "https://brennan.games/api/dp-relay/CAP"; }
+        });
+        assertTrue(DiscordPresenceConfig.isRelayMode());
+        assertEquals("https://brennan.games/api/dp-relay/CAP/hook", DiscordPresenceConfig.getWebhookUrl());
+        assertEquals("https://brennan.games/api/dp-relay/CAP/bot", DiscordPresenceConfig.getBotApiBase());
+    }
+
+    @Test
+    void relayMode_stripsTrailingSlashOnBase() {
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String relayBaseUrl() { return "https://relay/base/"; }
+        });
+        assertEquals("https://relay/base/hook", DiscordPresenceConfig.getWebhookUrl());
+        assertEquals("https://relay/base/bot", DiscordPresenceConfig.getBotApiBase());
     }
 }

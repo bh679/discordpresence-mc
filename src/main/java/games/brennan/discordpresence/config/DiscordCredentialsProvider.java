@@ -33,4 +33,15 @@ public interface DiscordCredentialsProvider {
     default String botToken() {
         return "";
     }
+
+    /**
+     * Optional relay base URL (e.g. {@code https://host/api/dp-relay/<cap>}). When non-blank, DP
+     * routes ALL Discord I/O through the relay — webhook posts to {@code <base>/hook}, bot REST to
+     * {@code <base>/bot} — and sends NO token (the relay injects it server-side). Lets a bundling
+     * mod point DP at a central feed while holding no Discord secret. Blank = talk to Discord
+     * directly using {@link #webhookUrl()} + {@link #botToken()}.
+     */
+    default String relayBaseUrl() {
+        return "";
+    }
 }
