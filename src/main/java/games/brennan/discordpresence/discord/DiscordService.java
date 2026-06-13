@@ -1,5 +1,7 @@
 package games.brennan.discordpresence.discord;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
 import games.brennan.discordpresence.config.DiscordPresenceClientConfig;
 import games.brennan.discordpresence.config.DiscordPresenceConfig;
@@ -10,11 +12,16 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.fml.loading.FMLPaths;
 import org.slf4j.Logger;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -222,17 +229,29 @@ public final class DiscordService {
         });
     }
 
-    public void onPlayerDeath(UUID uuid) {
+    public void onPlayerDeath(ServerPlayer player, DamageSource source) {
+        UUID uuid = player.getUUID();
+
+        // Existing behaviour: add the death reaction to this session's join message.
         CompletableFuture<DiscordMessageRef> posted = sessionMessages.get(uuid);
-        if (posted == null) {
-            return;
+        if (posted != null) {
+            String deathEmoji = DiscordPresenceConfig.getDeathEmoji();
+            posted.thenAccept(ref -> {
+                if (ref != null) {
+                    DiscordBotClient.addReaction(ref, deathEmoji);
+                }
+            });
         }
-        String deathEmoji = DiscordPresenceConfig.getDeathEmoji();
-        posted.thenAccept(ref -> {
-            if (ref != null) {
-                DiscordBotClient.addReaction(ref, deathEmoji);
-            }
-        });
+
+        // New: a rich death report (cause + basic stats + held/worn item image). Skipped when a
+        // bundling mod drives its own richer report via postDeathReport() (set autoDeathReport=false).
+        if (DiscordPresenceConfig.isAutoDeathReport()) {
+            String name = player.getGameProfile().getName();
+            String cause = source != null
+                    ? source.getLocalizedDeathMessage(player).getString()
+                    : name + " died";
+            postDeathReport(player, "💀 " + name, cause, basicDeathFields(player), heldAndArmor(player));
+        }
     }
 
     // --- two-way chat ---
@@ -406,6 +425,124 @@ public final class DiscordService {
         reverse.clear();
         autoResponder.clear();
         server = null;
+    }
+
+    // --- death report -----------------------------------------------------
+
+    /**
+     * Post a death / run-summary embed for {@code player}: a coloured embed with
+     * {@code title} + {@code description} + ordered {@code fields}, plus an image
+     * composed from {@code iconItems} (e.g. weapon + armor) attached and shown.
+     * Posts into the player's thread when they have one, else top-level, under the
+     * player's name/avatar. Best-effort; all HTTP + image work runs off-thread.
+     *
+     * <p><b>Public API.</b> A bundling mod (e.g. Dungeon Train) calls this with its
+     * own run stats + item stacks. The {@code iconItems} are read on the calling
+     * (server) thread and snapshotted to icon URLs immediately, so later mutation /
+     * clearing of those stacks (keep-inventory, respawn) cannot affect the image.</p>
+     */
+    public void postDeathReport(ServerPlayer player, String title, String description,
+                                List<DeathField> fields, List<ItemStack> iconItems) {
+        if (!enabled() || !networkAllowed(player.server)) {
+            return;
+        }
+        UUID uuid = player.getUUID();
+        String name = player.getGameProfile().getName();
+        JsonObject embed = buildReportEmbed(title, description, fields, DiscordPresenceConfig.getDeathReportEmbedColor());
+        // Snapshot the icons NOW (server thread); the off-thread work below only sees URLs + counts.
+        List<DeathImageComposer.IconSpec> icons =
+                DiscordPresenceConfig.isShowDeathReportImage() ? resolveIcons(iconItems) : List.of();
+        String threadId = threadStore.threadId(uuid); // player's thread, or null = top-level
+
+        CompletableFuture
+                .supplyAsync(() -> DeathImageComposer.compose(icons), DiscordHttp.EXECUTOR)
+                .exceptionally(t -> {
+                    LOGGER.warn("Death report image compose failed: {}", t.toString());
+                    return null;
+                })
+                .thenCompose(png -> DiscordWebhookClient.postReport(name, uuid, threadId, embed, png, "death.png"))
+                .thenAccept(ref -> {
+                    if (ref != null) {
+                        reverse.put(ref.messageId(), uuid);
+                    }
+                })
+                .exceptionally(t -> {
+                    LOGGER.warn("Death report post failed: {}", t.toString());
+                    return null;
+                });
+    }
+
+    /**
+     * Build the death-report embed JSON (title, description, colour, inline fields).
+     * Pure (colour passed in) so it is unit-testable without a loaded config.
+     */
+    static JsonObject buildReportEmbed(String title, String description, List<DeathField> fields, int color) {
+        JsonObject embed = new JsonObject();
+        if (title != null && !title.isBlank()) {
+            embed.addProperty("title", title);
+        }
+        if (description != null && !description.isBlank()) {
+            embed.addProperty("description", description);
+        }
+        embed.addProperty("color", color);
+        if (fields != null && !fields.isEmpty()) {
+            JsonArray arr = new JsonArray();
+            for (DeathField f : fields) {
+                if (f == null || f.name() == null || f.value() == null
+                        || f.name().isBlank() || f.value().isBlank()) {
+                    continue;
+                }
+                JsonObject jf = new JsonObject();
+                jf.addProperty("name", f.name());
+                jf.addProperty("value", f.value());
+                jf.addProperty("inline", true);
+                arr.add(jf);
+            }
+            if (!arr.isEmpty()) {
+                embed.add("fields", arr);
+            }
+        }
+        return embed;
+    }
+
+    /** Resolve item stacks to icon slots (URL + count) on the server thread; empty stacks → empty slots. */
+    private static List<DeathImageComposer.IconSpec> resolveIcons(List<ItemStack> items) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        String template = DiscordPresenceConfig.getDeathReportIconUrlTemplate();
+        List<DeathImageComposer.IconSpec> specs = new ArrayList<>(items.size());
+        for (ItemStack stack : items) {
+            if (stack == null || stack.isEmpty()) {
+                specs.add(new DeathImageComposer.IconSpec(null, 0));
+                continue;
+            }
+            var id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+            String url = advancementIconUrl(template, id.getNamespace(), id.getPath());
+            specs.add(new DeathImageComposer.IconSpec(url, stack.getCount()));
+        }
+        return specs;
+    }
+
+    /** Basic vanilla death-screen fields for DiscordPresence's own auto report. */
+    private static List<DeathField> basicDeathFields(ServerPlayer player) {
+        List<DeathField> fields = new ArrayList<>();
+        fields.add(new DeathField("Score", Integer.toString(player.getScore())));
+        var pos = player.blockPosition();
+        fields.add(new DeathField("Location", pos.getX() + ", " + pos.getY() + ", " + pos.getZ()));
+        fields.add(new DeathField("Dimension", player.level().dimension().location().toString()));
+        fields.add(new DeathField("XP Level", Integer.toString(player.experienceLevel)));
+        return fields;
+    }
+
+    /** The player's held item + the four armor slots, for the auto report image. */
+    private static List<ItemStack> heldAndArmor(ServerPlayer player) {
+        return List.of(
+                player.getMainHandItem(),
+                player.getItemBySlot(EquipmentSlot.HEAD),
+                player.getItemBySlot(EquipmentSlot.CHEST),
+                player.getItemBySlot(EquipmentSlot.LEGS),
+                player.getItemBySlot(EquipmentSlot.FEET));
     }
 
     // --- pure helpers (unit-tested) ---------------------------------------
