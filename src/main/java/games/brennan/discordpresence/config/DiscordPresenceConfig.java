@@ -283,6 +283,21 @@ public final class DiscordPresenceConfig {
         return relay.isBlank() ? "https://discord.com/api/v10" : relay + "/bot";
     }
 
+    /**
+     * WebSocket URL for the relay's inbound gateway ({@code <relayBase>/gateway} with a ws/wss
+     * scheme), or {@code ""} when not in relay-mode.
+     */
+    public static String getRelayGatewayUrl() {
+        String base = getRelayBaseUrl();
+        if (base.isBlank()) {
+            return "";
+        }
+        String ws = base.startsWith("https://") ? "wss://" + base.substring("https://".length())
+                : base.startsWith("http://") ? "ws://" + base.substring("http://".length())
+                : base;
+        return ws + "/gateway";
+    }
+
     public static String getBotToken() {
         String configValue = isLoaded() ? BOT_TOKEN.get() : "";
         return CredentialResolver.resolve(configValue, DiscordCredentials.providerBotToken(), CREDENTIAL_POLICY);
