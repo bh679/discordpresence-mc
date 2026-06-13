@@ -159,7 +159,7 @@ public final class DiscordPresenceConfig {
                 .defineInRange("rearmMinutes", DEFAULT_AUTO_RESPONSE_REARM_MINUTES, 1, 525_600);
         AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS = b
                 .comment("Minimum seconds between auto-responses while the player is ALONE (no other players",
-                         "online). 0 = every chat message.")
+                         "online). A 30-second floor always applies — values below 30 are treated as 30.")
                 .defineInRange("aloneCooldownSeconds", DEFAULT_AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS, 0, 86_400);
         AUTO_RESPONSE_ALONE_MESSAGES = b
                 .comment("Flavour lines used when the player is ALONE; one is chosen at random.",
@@ -167,7 +167,8 @@ public final class DiscordPresenceConfig {
                 .defineListAllowEmpty("aloneMessages", () -> DEFAULT_AUTO_RESPONSE_ALONE_MESSAGES, () -> "",
                         o -> o instanceof String);
         AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS = b
-                .comment("Minimum seconds between auto-responses while OTHER players are online.")
+                .comment("Minimum seconds between auto-responses while OTHER players are online.",
+                         "A 30-second floor always applies — values below 30 are treated as 30.")
                 .defineInRange("groupCooldownSeconds", DEFAULT_AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS, 0, 86_400);
         AUTO_RESPONSE_GROUP_MESSAGES = b
                 .comment("Flavour lines used when OTHER players are online; one is chosen at random.",

@@ -1,6 +1,7 @@
 package games.brennan.discordpresence.discord;
 
 import games.brennan.discordpresence.config.DiscordPresenceConfig;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -30,6 +31,9 @@ import java.util.concurrent.ThreadLocalRandom;
  * off-thread on the gateway — the store and cooldown map are both thread-safe.</p>
  */
 final class AutoResponder {
+
+    /** Hard floor: never more than one auto-response per 30 seconds, whatever the config says. */
+    private static final int MIN_COOLDOWN_SECONDS = 30;
 
     private final AutoResponseStore store = new AutoResponseStore();
 
@@ -80,9 +84,9 @@ final class AutoResponder {
         if (messages.isEmpty()) {
             return; // this mode disabled
         }
-        int cooldownSeconds = alone
+        int cooldownSeconds = effectiveCooldownSeconds(alone
                 ? DiscordPresenceConfig.getAutoResponseAloneCooldownSeconds()
-                : DiscordPresenceConfig.getAutoResponseGroupCooldownSeconds();
+                : DiscordPresenceConfig.getAutoResponseGroupCooldownSeconds());
         if (!cooldownElapsed(lastWhisper.get(uuid), now, cooldownSeconds)) {
             return;
         }
@@ -93,8 +97,12 @@ final class AutoResponder {
             return;
         }
         lastWhisper.put(uuid, now);
-        // System message — does NOT re-fire ServerChatEvent, so no relay loop.
-        server.getPlayerList().broadcastSystemMessage(Component.literal(line), false);
+        // Grey, like a system message. Deferred onto the server task queue so it lands
+        // AFTER the player's own chat line — the ServerChatEvent we're inside broadcasts
+        // that synchronously once handlers return. A system message never re-fires
+        // ServerChatEvent, so there is no relay loop.
+        Component message = Component.literal(line).withStyle(ChatFormatting.GRAY);
+        server.execute(() -> server.getPlayerList().broadcastSystemMessage(message, false));
     }
 
     // --- pure helpers (unit-tested) ---------------------------------------
@@ -118,6 +126,11 @@ final class AutoResponder {
             return true;
         }
         return now - lastWhisperMillis >= (long) cooldownSeconds * 1000L;
+    }
+
+    /** The configured cooldown, floored at {@link #MIN_COOLDOWN_SECONDS} (one auto-response per 30s max). */
+    static int effectiveCooldownSeconds(int configuredSeconds) {
+        return Math.max(MIN_COOLDOWN_SECONDS, configuredSeconds);
     }
 
     /** Pick a message by {@code roll} (mod size) and substitute {@code {player}}; null when empty. */

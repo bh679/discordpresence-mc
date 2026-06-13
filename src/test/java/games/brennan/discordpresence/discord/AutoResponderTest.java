@@ -72,6 +72,14 @@ class AutoResponderTest {
         assertTrue(AutoResponder.cooldownElapsed(T0, T0, 0));
     }
 
+    @Test
+    void cooldownFlooredAtThirtySeconds() {
+        assertEquals(30, AutoResponder.effectiveCooldownSeconds(0));
+        assertEquals(30, AutoResponder.effectiveCooldownSeconds(10));
+        assertEquals(30, AutoResponder.effectiveCooldownSeconds(30));
+        assertEquals(300, AutoResponder.effectiveCooldownSeconds(300));
+    }
+
     // --- pickAndFormat ---
 
     @Test
