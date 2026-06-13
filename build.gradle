@@ -80,8 +80,37 @@ tasks.named('test', Test).configure {
     }
 }
 
-// Generate neoforge.mods.toml + pack.mcmeta from templates so the version and
-// metadata stay DRY (single source of truth = gradle.properties).
+// Resolve the current git branch at configuration time so it can be baked into
+// the jar via processResources (discordpresence_version.properties). Falls back
+// to the short SHA on detached HEAD.
+//
+// Strict branch-ref detection: only the literal `main` ref counts as a release
+// build. Worktrees / feature branches bake their own branch name and therefore
+// show the dev HUD (see client/VersionHudOverlay). The branch ref — not the
+// commit hash — is the dev-vs-release signal.
+def gitBranch = { ->
+    try {
+        def proc = ['git', 'rev-parse', '--abbrev-ref', 'HEAD']
+                .execute(null, project.projectDir)
+        proc.waitForOrKill(5000)
+        def name = proc.in.text.trim()
+        if (name == 'HEAD' || name.isEmpty()) {
+            def p2 = ['git', 'rev-parse', '--short', 'HEAD']
+                    .execute(null, project.projectDir)
+            p2.waitForOrKill(5000)
+            def sha = p2.in.text.trim()
+            return sha ?: 'unknown'
+        }
+        return name
+    } catch (Exception e) {
+        logger.warn("Could not resolve git branch for version resource: {}", e.message)
+        return 'unknown'
+    }
+}()
+
+// Generate neoforge.mods.toml + pack.mcmeta + discordpresence_version.properties
+// from templates so the version and metadata stay DRY (single source of truth =
+// gradle.properties).
 tasks.register('generateModMetadata', ProcessResources) {
     var replaceProperties = [
         minecraft_version       : minecraft_version,
@@ -94,6 +123,7 @@ tasks.register('generateModMetadata', ProcessResources) {
         mod_version             : mod_version,
         mod_authors             : mod_authors,
         mod_description         : mod_description,
+        git_branch              : gitBranch,
     ]
     inputs.properties replaceProperties
     expand replaceProperties
