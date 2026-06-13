@@ -32,16 +32,37 @@ final class DiscordWebhookClient {
     private DiscordWebhookClient() {}
 
     /**
+     * Posts the configured join message; the player name fills the {@code {player}}
+     * placeholder in the template.
+     *
      * @return a future of the posted message ref, completing with {@code null}
      *         when disabled or on any failure (callers tolerate null).
      */
     static CompletableFuture<DiscordMessageRef> postJoinMessage(String playerName, UUID uuid) {
+        String content = DiscordPresenceConfig.getJoinMessageTemplate().replace("{player}", playerName);
+        return post(content, playerName, uuid);
+    }
+
+    /**
+     * Relays a line of in-game chat to Discord under the player's name + avatar
+     * (the game→Discord half of the two-way bridge). The returned ref is indexed
+     * by {@link DiscordService} so Discord replies/threads on it route back.
+     */
+    static CompletableFuture<DiscordMessageRef> postChat(String playerName, UUID uuid, String content) {
+        return post(content, playerName, uuid);
+    }
+
+    /**
+     * Shared webhook POST with {@code ?wait=true} (so Discord returns the created
+     * message's id + channel_id). Best-effort: resolves to {@code null} when the
+     * webhook is unset or on any failure.
+     */
+    private static CompletableFuture<DiscordMessageRef> post(String content, String playerName, UUID uuid) {
         String webhookUrl = DiscordPresenceConfig.getWebhookUrl();
         if (webhookUrl.isBlank()) {
             return CompletableFuture.completedFuture(null);
         }
 
-        String content = DiscordPresenceConfig.getJoinMessageTemplate().replace("{player}", playerName);
         String body = buildPayload(content, playerName, uuid);
 
         HttpRequest req = HttpRequest.newBuilder(URI.create(appendWait(webhookUrl)))

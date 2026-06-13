@@ -1,6 +1,7 @@
 package games.brennan.discordpresence;
 
 import com.mojang.logging.LogUtils;
+import games.brennan.discordpresence.config.DiscordPresenceClientConfig;
 import games.brennan.discordpresence.config.DiscordPresenceConfig;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
@@ -29,6 +30,14 @@ public class DiscordPresence {
                 ModConfig.Type.SERVER,
                 DiscordPresenceConfig.SPEC,
                 "discordpresence-server.toml");
+
+        // CLIENT config — physical client only. Holds the one-time network-access
+        // consent shown on the title screen (see ClientPresenceEvents). Harmless on a
+        // dedicated server: registered but never opened, so its isLoaded() stays false.
+        modContainer.registerConfig(
+                ModConfig.Type.CLIENT,
+                DiscordPresenceClientConfig.SPEC,
+                "discordpresence-client.toml");
 
         // No NeoForge.EVENT_BUS.register(this): the game-bus listeners live in
         // DiscordPresenceEvents (@EventBusSubscriber), which FML auto-registers.
