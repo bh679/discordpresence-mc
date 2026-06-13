@@ -54,6 +54,19 @@ public final class DiscordCredentials {
         return read(DiscordCredentialsProvider::relayBaseUrl);
     }
 
+    /** Whether the provider asks DP to suppress its own auto-death-report; false when none / it throws. */
+    public static boolean providerSuppressAutoDeathReport() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return false;
+        }
+        try {
+            return current.suppressAutoDeathReport();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     /** Snapshot the volatile slot and read one field, mapping null / any throwable to {@code ""}. */
     private static String read(Function<DiscordCredentialsProvider, String> field) {
         DiscordCredentialsProvider current = provider;
