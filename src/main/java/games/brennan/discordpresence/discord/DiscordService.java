@@ -39,9 +39,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * so events that fire before a webhook POST / thread creation completes still
  * chain correctly:</p>
  * <ul>
- *   <li>{@code sessionMessages} — this session's join message (the first-join
- *       anchor, or the in-thread "started" message); carries the online/death
- *       reactions, cleared on logout.</li>
+ *   <li>{@code sessionMessages} — the message carrying this session's online/death
+ *       reactions: the player's top-level thread message (the anchor) when they have a
+ *       thread, otherwise a plain top-level message; cleared on logout.</li>
  *   <li>{@code threadFutures} — the player's thread id, backed by the durable
  *       {@link DiscordThreadStore}, so an advancement earned while the first-join
  *       thread is still being created still lands once it resolves.</li>
@@ -65,6 +65,7 @@ public final class DiscordService {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int MAX_RELAY_CHARS = 256;
     private static final String THREAD_STORE_FILE = "discordpresence-threads.json";
+    private static final String AUTO_RESPONSE_STORE_FILE = "discordpresence-autoresponse.json";
 
     private static final DiscordService INSTANCE = new DiscordService();
 
@@ -80,6 +81,9 @@ public final class DiscordService {
 
     /** messageId / threadId → owning player, for everything we post on a player's behalf. */
     private final PlayerMessageIndex reverse = new PlayerMessageIndex();
+
+    /** In-game "whispers into the darkness" auto-responses — game-side only, no Discord I/O. */
+    private final AutoResponder autoResponder = new AutoResponder();
 
     /** One-shot WARN so a missing privileged intent doesn't spam the log. */
     private final AtomicBoolean warnedBlankContent = new AtomicBoolean(false);
@@ -120,6 +124,7 @@ public final class DiscordService {
     /** Opens the gateway (if inbound relay is enabled and consented) once the server is up. */
     public void onServerStarted(MinecraftServer startedServer) {
         this.server = startedServer;
+        autoResponder.loadState(FMLPaths.CONFIGDIR.get().resolve(AUTO_RESPONSE_STORE_FILE));
         LOGGER.info("Discord Presence onServerStarted: dedicated={}, webhookSet={}, consent={}, relayDiscordToGame={}, botTokenSet={}",
                 startedServer.isDedicatedServer(), enabled(),
                 DiscordPresenceClientConfig.getConsent(), DiscordPresenceConfig.isRelayDiscordToGame(),
@@ -155,20 +160,30 @@ public final class DiscordService {
             return;
         }
 
-        String existingThread = threadStore.get(uuid);
-        if (existingThread != null) {
-            // Returning player: post "started the game" INTO their thread. Index the thread id so
-            // replies / messages there route back in-game.
-            reverse.put(existingThread, uuid);
+        DiscordMessageRef stored = threadStore.get(uuid);
+        if (stored != null) {
+            // Returning player: index the thread id so replies / messages there route back
+            // in-game, and post the per-session "started the game" line INTO their thread as an
+            // activity marker / reply anchor. The live reaction, though, goes on the TOP-LEVEL
+            // thread message (the anchor) — not this in-thread line — every session.
+            String threadId = stored.messageId();
+            reverse.put(threadId, uuid);
+            threadFutures.put(uuid, CompletableFuture.completedFuture(threadId));
+
             String content = format(DiscordPresenceConfig.getJoinMessageTemplate(), name);
-            sessionMessages.put(uuid,
-                    trackForReplies(postAndReact(content, name, uuid, existingThread, onlineEmoji), uuid));
-            threadFutures.put(uuid, CompletableFuture.completedFuture(existingThread));
+            trackForReplies(DiscordWebhookClient.post(content, name, uuid, threadId), uuid);
+
+            sessionMessages.put(uuid, anchorRef(uuid, stored).thenApply(anchor -> {
+                if (anchor != null) {
+                    DiscordBotClient.addReaction(anchor, onlineEmoji);
+                }
+                return anchor;
+            }));
             return;
         }
 
         // First join ever: post the top-level anchor, react on it, index it (its id == the thread
-        // id), and create the player's thread from it (persisting the id once it resolves).
+        // id), and create the player's thread from it (persisting the anchor ref once it resolves).
         String content = format(DiscordPresenceConfig.getFirstJoinMessageTemplate(), name);
         CompletableFuture<DiscordMessageRef> anchor =
                 DiscordWebhookClient.post(content, name, uuid, null);
@@ -183,17 +198,21 @@ public final class DiscordService {
 
         String threadName = format(DiscordPresenceConfig.getThreadNameTemplate(), name);
         int autoArchive = DiscordPresenceConfig.getThreadAutoArchiveMinutes();
-        CompletableFuture<String> created = anchor
-                .thenCompose(ref -> ref == null
-                        ? CompletableFuture.completedFuture(null)
-                        : DiscordThreadClient.createThreadFromMessage(ref, threadName, autoArchive))
-                .thenApply(threadId -> {
-                    if (threadId != null) {
-                        threadStore.put(uuid, threadId);
-                        reverse.put(threadId, uuid); // thread id == anchor message id → anchors inbound routing
-                    }
-                    return threadId;
-                });
+        CompletableFuture<String> created = anchor.thenCompose(ref -> {
+            if (ref == null) {
+                return CompletableFuture.completedFuture(null);
+            }
+            return DiscordThreadClient.createThreadFromMessage(ref, threadName, autoArchive)
+                    .thenApply(threadId -> {
+                        if (threadId != null) {
+                            // Persist the anchor (parent channel + thread id, which == the anchor
+                            // message id) so future sessions react on the top-level thread message.
+                            threadStore.put(uuid, new DiscordMessageRef(ref.channelId(), threadId));
+                            reverse.put(threadId, uuid); // thread id == anchor message id → anchors inbound routing
+                        }
+                        return threadId;
+                    });
+        });
         threadFutures.put(uuid, created);
     }
 
@@ -247,12 +266,14 @@ public final class DiscordService {
         }
         UUID uuid = player.getUUID();
         String name = player.getGameProfile().getName();
-        String threadId = threadStore.get(uuid); // into the player's thread if they have one (null → top-level)
+        String threadId = threadStore.threadId(uuid); // into the player's thread if they have one (null → top-level)
         DiscordWebhookClient.postChat(name, uuid, text, threadId).thenAccept(ref -> {
             if (ref != null) {
                 reverse.put(ref.messageId(), uuid);
             }
         });
+        // In-game flavour feedback when the player is "whispering into the darkness".
+        autoResponder.onPlayerChat(player);
     }
 
     /**
@@ -269,6 +290,14 @@ public final class DiscordService {
         }
         if (!isRelayable(msg, reverse)) {
             return; // our own posts/bots, or not anchored to a tracked player message
+        }
+        // A Discord reply reached the server — disarm that player's auto-responses.
+        UUID owner = reverse.get(msg.referencedMessageId());
+        if (owner == null) {
+            owner = reverse.get(msg.channelId());
+        }
+        if (owner != null) {
+            autoResponder.onDiscordActivity(owner);
         }
         String content = sanitize(msg.content());
         if (content.isBlank()) {
@@ -338,7 +367,7 @@ public final class DiscordService {
         UUID uuid = player.getUUID();
         CompletableFuture<String> threadFuture = threadFutures.get(uuid);
         if (threadFuture == null) {
-            String existing = threadStore.get(uuid);
+            String existing = threadStore.threadId(uuid);
             if (existing == null) {
                 return; // no thread, and none in flight
             }
@@ -394,6 +423,7 @@ public final class DiscordService {
         sessionMessages.clear();
         threadFutures.clear();
         reverse.clear();
+        autoResponder.clear();
         server = null;
     }
 
@@ -422,7 +452,7 @@ public final class DiscordService {
         // Snapshot the icons NOW (server thread); the off-thread work below only sees URLs + counts.
         List<DeathImageComposer.IconSpec> icons =
                 DiscordPresenceConfig.isShowDeathReportImage() ? resolveIcons(iconItems) : List.of();
-        String threadId = threadStore.get(uuid); // player's thread, or null = top-level
+        String threadId = threadStore.threadId(uuid); // player's thread, or null = top-level
 
         CompletableFuture
                 .supplyAsync(() -> DeathImageComposer.compose(icons), DiscordHttp.EXECUTOR)
@@ -537,6 +567,25 @@ public final class DiscordService {
                     }
                     return ref;
                 });
+    }
+
+    /**
+     * The player's top-level thread message (the anchor) that carries this session's
+     * reactions. Uses the stored parent channel when present; for a legacy entry that
+     * predates storing it, resolves the parent channel once via the bot API and upgrades
+     * the store. Resolves to {@code null} only when the parent can't be determined (e.g.
+     * a blank/invalid bot token) — in which case reactions couldn't be applied anyway.
+     */
+    private CompletableFuture<DiscordMessageRef> anchorRef(UUID uuid, DiscordMessageRef stored) {
+        if (stored.channelId() != null) {
+            return CompletableFuture.completedFuture(stored);
+        }
+        return DiscordThreadClient.fetchAnchorRef(stored.messageId()).thenApply(resolved -> {
+            if (resolved != null) {
+                threadStore.put(uuid, resolved); // self-upgrade the legacy entry
+            }
+            return resolved;
+        });
     }
 
     /**

@@ -41,6 +41,26 @@ public final class DiscordPresenceConfig {
     public static final boolean DEFAULT_RELAY_GAME_TO_DISCORD = true;
     public static final String DEFAULT_DISCORD_TO_GAME_FORMAT = "<{user}> {msg}";
 
+    public static final boolean DEFAULT_AUTO_RESPONSE_ENABLED = true;
+    public static final int DEFAULT_AUTO_RESPONSE_REARM_MINUTES = 30;
+    public static final int DEFAULT_AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS = 30;
+    public static final int DEFAULT_AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS = 300;
+    public static final String DEFAULT_AUTO_RESPONSE_ALONE_TEMPLATE = "{player} {verb} into the {place}, {phrase}";
+    public static final List<String> DEFAULT_AUTO_RESPONSE_VERBS = List.of(
+            "whispers", "yells", "screams", "mutters", "mumbles", "shouts", "murmurs",
+            "cries out", "calls out", "hollers", "bellows", "echoes", "pleads");
+    public static final List<String> DEFAULT_AUTO_RESPONSE_PLACES = List.of(
+            "darkness", "void", "open world", "minecraft world", "computer", "chat",
+            "abyss", "silence", "wilderness", "ether", "emptiness", "unknown",
+            "shadows", "nothingness", "expanse");
+    public static final List<String> DEFAULT_AUTO_RESPONSE_PHRASES = List.of(
+            "will anyone answer?", "the silence lingers...", "hoping for a reply...",
+            "but no one stirs...", "maybe the world is listening?", "who's out there?",
+            "a voice in the dark...", "waiting for an echo...", "is the void listening?",
+            "perhaps a friend lurks nearby...");
+    public static final List<String> DEFAULT_AUTO_RESPONSE_GROUP_MESSAGES =
+            List.of("{player} mutters to themselves...");
+
     public static final ModConfigSpec SPEC;
     public static final ModConfigSpec.ConfigValue<String> WEBHOOK_URL;
     public static final ModConfigSpec.ConfigValue<String> BOT_TOKEN;
@@ -57,6 +77,15 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.ConfigValue<List<? extends String>> ADVANCEMENT_NAMESPACES;
     public static final ModConfigSpec.BooleanValue ONLY_DISPLAY_ADVANCEMENTS;
     public static final ModConfigSpec.ConfigValue<String> ADVANCEMENT_MESSAGE_TEMPLATE;
+    public static final ModConfigSpec.BooleanValue AUTO_RESPONSE_ENABLED;
+    public static final ModConfigSpec.IntValue AUTO_RESPONSE_REARM_MINUTES;
+    public static final ModConfigSpec.IntValue AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS;
+    public static final ModConfigSpec.ConfigValue<String> AUTO_RESPONSE_ALONE_TEMPLATE;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_RESPONSE_VERBS;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_RESPONSE_PLACES;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_RESPONSE_PHRASES;
+    public static final ModConfigSpec.IntValue AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_RESPONSE_GROUP_MESSAGES;
     public static final ModConfigSpec.BooleanValue SHOW_ADVANCEMENT_ICON;
     public static final ModConfigSpec.ConfigValue<String> ADVANCEMENT_ICON_URL_TEMPLATE;
     public static final ModConfigSpec.BooleanValue AUTO_DEATH_REPORT;
@@ -177,6 +206,53 @@ public final class DiscordPresenceConfig {
                          "only — point it at your own render host for modded items.")
                 .define("deathReportIconUrlTemplate", DEFAULT_DEATH_REPORT_ICON_URL_TEMPLATE);
         b.pop();
+
+        b.push("autoResponse");
+        AUTO_RESPONSE_ENABLED = b
+                .comment("Show an in-game flavour line when a player chats while no Discord conversation is",
+                         "active (\"whispering into the darkness\"). Purely in-game — it posts nothing new to",
+                         "Discord; the chat line itself still relays via relayGameToDiscord. Turns off once a",
+                         "Discord reply reaches the server, re-arming after rearmMinutes of silence.")
+                .define("enabled", DEFAULT_AUTO_RESPONSE_ENABLED);
+        AUTO_RESPONSE_REARM_MINUTES = b
+                .comment("Minutes of Discord silence (no relayed reply for that player) before auto-responses",
+                         "re-arm. For local games this is remembered across worlds.")
+                .defineInRange("rearmMinutes", DEFAULT_AUTO_RESPONSE_REARM_MINUTES, 1, 525_600);
+        AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS = b
+                .comment("Minimum seconds between auto-responses while the player is ALONE (no other players",
+                         "online). A 30-second floor always applies — values below 30 are treated as 30.")
+                .defineInRange("aloneCooldownSeconds", DEFAULT_AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS, 0, 86_400);
+        AUTO_RESPONSE_ALONE_TEMPLATE = b
+                .comment("Template for the ALONE auto-response, assembled from random picks of the lists below.",
+                         "Placeholders: '{player}' = name, '{verb}', '{place}', '{phrase}'. Default reads e.g.",
+                         "\"Steve whispers into the darkness, is anyone there?\"")
+                .define("aloneTemplate", DEFAULT_AUTO_RESPONSE_ALONE_TEMPLATE);
+        AUTO_RESPONSE_VERBS = b
+                .comment("'{verb}' options for the alone template (e.g. whispers, yells). One picked at random.",
+                         "Empty = no alone auto-response.")
+                .defineListAllowEmpty("verbs", () -> DEFAULT_AUTO_RESPONSE_VERBS, () -> "whispers",
+                        o -> o instanceof String);
+        AUTO_RESPONSE_PLACES = b
+                .comment("'{place}' options for the alone template (e.g. darkness, void). One picked at random.",
+                         "Empty = no alone auto-response.")
+                .defineListAllowEmpty("places", () -> DEFAULT_AUTO_RESPONSE_PLACES, () -> "darkness",
+                        o -> o instanceof String);
+        AUTO_RESPONSE_PHRASES = b
+                .comment("'{phrase}' options for the alone template (the trailing line). One picked at random.",
+                         "Empty = no alone auto-response.")
+                .defineListAllowEmpty("phrases", () -> DEFAULT_AUTO_RESPONSE_PHRASES, () -> "is anyone there?",
+                        o -> o instanceof String);
+        AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS = b
+                .comment("Minimum seconds between auto-responses while OTHER players are online.",
+                         "A 30-second floor always applies — values below 30 are treated as 30.")
+                .defineInRange("groupCooldownSeconds", DEFAULT_AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS, 0, 86_400);
+        AUTO_RESPONSE_GROUP_MESSAGES = b
+                .comment("Flavour lines used when OTHER players are online; one is chosen at random.",
+                         "'{player}' is replaced with the player's name. Empty list = no group auto-response.")
+                .defineListAllowEmpty("groupMessages", () -> DEFAULT_AUTO_RESPONSE_GROUP_MESSAGES, () -> "",
+                        o -> o instanceof String);
+        b.pop();
+
         SPEC = b.build();
     }
 
@@ -245,6 +321,42 @@ public final class DiscordPresenceConfig {
 
     public static String getAdvancementMessageTemplate() {
         return isLoaded() ? ADVANCEMENT_MESSAGE_TEMPLATE.get() : DEFAULT_ADVANCEMENT_TEMPLATE;
+    }
+
+    public static boolean isAutoResponseEnabled() {
+        return isLoaded() ? AUTO_RESPONSE_ENABLED.get() : DEFAULT_AUTO_RESPONSE_ENABLED;
+    }
+
+    public static int getAutoResponseRearmMinutes() {
+        return isLoaded() ? AUTO_RESPONSE_REARM_MINUTES.get() : DEFAULT_AUTO_RESPONSE_REARM_MINUTES;
+    }
+
+    public static int getAutoResponseAloneCooldownSeconds() {
+        return isLoaded() ? AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS.get() : DEFAULT_AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS;
+    }
+
+    public static String getAutoResponseAloneTemplate() {
+        return isLoaded() ? AUTO_RESPONSE_ALONE_TEMPLATE.get() : DEFAULT_AUTO_RESPONSE_ALONE_TEMPLATE;
+    }
+
+    public static List<? extends String> getAutoResponseVerbs() {
+        return isLoaded() ? AUTO_RESPONSE_VERBS.get() : DEFAULT_AUTO_RESPONSE_VERBS;
+    }
+
+    public static List<? extends String> getAutoResponsePlaces() {
+        return isLoaded() ? AUTO_RESPONSE_PLACES.get() : DEFAULT_AUTO_RESPONSE_PLACES;
+    }
+
+    public static List<? extends String> getAutoResponsePhrases() {
+        return isLoaded() ? AUTO_RESPONSE_PHRASES.get() : DEFAULT_AUTO_RESPONSE_PHRASES;
+    }
+
+    public static int getAutoResponseGroupCooldownSeconds() {
+        return isLoaded() ? AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS.get() : DEFAULT_AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS;
+    }
+
+    public static List<? extends String> getAutoResponseGroupMessages() {
+        return isLoaded() ? AUTO_RESPONSE_GROUP_MESSAGES.get() : DEFAULT_AUTO_RESPONSE_GROUP_MESSAGES;
     }
 
     public static boolean isShowAdvancementIcon() {
