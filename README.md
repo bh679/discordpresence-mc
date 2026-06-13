@@ -104,6 +104,32 @@ under a separate `[autoResponse]` section of `discordpresence-server.toml`:
 | `groupCooldownSeconds` | `300` | Min seconds between responses when other players are online. |
 | `groupMessages` | `["{player} mutters to themselves..."]` | Flat message pool used when others are online. |
 
+## Bundling into another mod
+
+Discord Presence ships **blank** — there's no webhook or token in its jar, so on its own it stays
+off until a server owner fills in `discordpresence-server.toml`. A mod that **bundles** DP (e.g.
+[Dungeon Train](https://github.com/bh679/dungeon-train-mc) via jarJar) can point it at a central
+feed at runtime by registering a `DiscordCredentialsProvider` from its `@Mod` constructor:
+
+```java
+import games.brennan.discordpresence.config.DiscordCredentials;
+
+// in your mod's constructor — webhookUrl(); botToken() defaults to "" (so you can supply a webhook only)
+DiscordCredentials.register(() -> "https://your-relay.example/hook");
+```
+
+`getWebhookUrl()` / `getBotToken()` fold the provider's values in via `CredentialResolver`. The
+default precedence is **provider-wins** — the bundled feed overrides a server owner's local config
+(flip `CREDENTIAL_POLICY` to `CONFIG_WINS` to invert). With no provider registered, DP behaves
+exactly as before.
+
+> **Don't ship a secret in the jar.** A webhook URL — and *especially* a bot token — embedded in a
+> distributed jar is extractable even when obfuscated, and Discord auto-revokes leaked tokens. The
+> safe pattern is a small **relay you host**: return the relay's URL from `webhookUrl()` (DP posts
+> to it exactly like a Discord webhook, as long as it forwards to Discord and returns Discord's
+> response) and keep the real webhook + token server-side. Leave `botToken()` blank unless the relay
+> also fronts the bot API.
+
 ## Build
 
 ```bash

@@ -233,12 +233,24 @@ public final class DiscordPresenceConfig {
         return SPEC.isLoaded();
     }
 
+    /**
+     * Precedence for merging the admin's config value with a bundling mod's
+     * provider value (see {@link DiscordCredentials}). PROVIDER_WINS = a bundling
+     * mod's central feed overrides local config; flip to CONFIG_WINS to let a
+     * server owner's own webhook/token take priority. Standalone DP (no provider)
+     * is unaffected either way — the provider value is blank.
+     */
+    private static final CredentialResolver.Policy CREDENTIAL_POLICY =
+            CredentialResolver.Policy.PROVIDER_WINS;
+
     public static String getWebhookUrl() {
-        return isLoaded() ? WEBHOOK_URL.get() : "";
+        String configValue = isLoaded() ? WEBHOOK_URL.get() : "";
+        return CredentialResolver.resolve(configValue, DiscordCredentials.providerWebhookUrl(), CREDENTIAL_POLICY);
     }
 
     public static String getBotToken() {
-        return isLoaded() ? BOT_TOKEN.get() : "";
+        String configValue = isLoaded() ? BOT_TOKEN.get() : "";
+        return CredentialResolver.resolve(configValue, DiscordCredentials.providerBotToken(), CREDENTIAL_POLICY);
     }
 
     public static String getJoinMessageTemplate() {
