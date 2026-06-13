@@ -1,10 +1,13 @@
 package games.brennan.discordpresence.discord;
 
 import com.mojang.logging.LogUtils;
+import games.brennan.discordpresence.config.DiscordPresenceClientConfig;
 import games.brennan.discordpresence.config.DiscordPresenceConfig;
 import net.minecraft.ChatFormatting;
 import net.minecraft.advancements.AdvancementHolder;
 import net.minecraft.advancements.DisplayInfo;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.fml.loading.FMLPaths;
 import org.slf4j.Logger;
@@ -16,18 +19,16 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Orchestrates Discord Presence: posts the join message, maintains one
- * persistent thread per player, manages the online/death reactions, and
- * announces advancements in the thread. The single entry point the event
- * subscriber delegates to — and the seam the future two-way chat inbound path
- * (Discord reply → in-game) will extend, since it already owns the
- * per-player ↔ message/thread mapping.
+ * Orchestrates Discord Presence: posts the join message, maintains one persistent
+ * thread per player, manages the online/death reactions, announces advancements in
+ * the thread, and bridges chat both ways. The single entry point the event
+ * subscribers delegate to.
  *
- * <p>Two per-player maps hold <i>futures</i>, not resolved values, so events
- * that fire before a webhook POST / thread creation completes still chain
- * correctly:</p>
+ * <p>Two per-player maps hold <i>futures</i>, not resolved values, so events that
+ * fire before a webhook POST / thread creation completes still chain correctly:</p>
  * <ul>
  *   <li>{@code sessionMessages} — this session's join message (the first-join
  *       anchor, or the in-thread "started" message). Carries the online/death
@@ -37,13 +38,27 @@ import java.util.concurrent.ConcurrentHashMap;
  *       resolves. Backed by the durable {@link DiscordThreadStore}.</li>
  * </ul>
  *
- * <p>Continuations run on the HTTP executor; the server thread only ever
- * enqueues non-blocking work.</p>
+ * <p><b>Two-way chat.</b> game→Discord relays each {@code ServerChatEvent} line
+ * through the webhook under the player's name. Discord→game runs a persistent
+ * {@link DiscordGateway}: a Discord message is relayed in only when it is
+ * <i>anchored</i> to a message the mod posted for a player — a reply to it, or a
+ * message in the thread spun off it — resolved via {@link PlayerMessageIndex}
+ * (messageId → UUID; a message-thread's id equals its source message id, so a reply
+ * and a thread message are the same lookup). Inbound delivery hops to the server
+ * thread and broadcasts as a system message, so it never re-fires
+ * {@code ServerChatEvent} (no relay loop).</p>
+ *
+ * <p><b>Network gate.</b> On a dedicated server the relay is on by default; in
+ * singleplayer all Discord network use waits on the one-time client consent.</p>
+ *
+ * <p>Continuations run on the HTTP executor; the server thread only ever enqueues
+ * non-blocking work.</p>
  */
 public final class DiscordService {
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final String THREAD_STORE_FILE = "discordpresence-threads.json";
+    private static final int MAX_RELAY_CHARS = 256;
 
     private static final DiscordService INSTANCE = new DiscordService();
 
@@ -57,6 +72,15 @@ public final class DiscordService {
     private final ConcurrentHashMap<UUID, CompletableFuture<String>> threadFutures =
             new ConcurrentHashMap<>();
 
+    /** messageId → owning player, for every message we post on a player's behalf (join + relayed chat). */
+    private final PlayerMessageIndex reverse = new PlayerMessageIndex();
+
+    /** One-shot WARN so a missing privileged intent doesn't spam the log. */
+    private final AtomicBoolean warnedBlankContent = new AtomicBoolean(false);
+
+    private volatile MinecraftServer server;
+    private volatile DiscordGateway gateway;
+
     private DiscordService() {}
 
     /** Off entirely when no webhook URL is configured. */
@@ -64,14 +88,71 @@ public final class DiscordService {
         return !DiscordPresenceConfig.getWebhookUrl().isBlank();
     }
 
-    /** Load the persisted player→thread map on server start (before any join). */
-    public void loadThreads() {
+    /**
+     * Whether the mod may use the network in the current context. Dedicated servers
+     * are always allowed (opt out via config); singleplayer / LAN waits on the
+     * one-time client consent.
+     */
+    private boolean networkAllowed(MinecraftServer srv) {
+        if (srv == null) {
+            return false;
+        }
+        if (srv.isDedicatedServer()) {
+            return true;
+        }
+        return DiscordPresenceClientConfig.isGranted();
+    }
+
+    // --- server lifecycle ---
+
+    /**
+     * On server start: load the persisted player→thread map (before any join), then
+     * open the gateway when inbound relay is enabled, consented and a token is set.
+     */
+    public void onServerStarted(MinecraftServer startedServer) {
+        this.server = startedServer;
+        loadThreads();
+        LOGGER.info("Discord Presence onServerStarted: dedicated={}, webhookSet={}, consent={}, relayDiscordToGame={}, botTokenSet={}",
+                startedServer.isDedicatedServer(), enabled(),
+                DiscordPresenceClientConfig.getConsent(), DiscordPresenceConfig.isRelayDiscordToGame(),
+                !DiscordPresenceConfig.getBotToken().isBlank());
+        if (!enabled() || !networkAllowed(startedServer) || !DiscordPresenceConfig.isRelayDiscordToGame()) {
+            return;
+        }
+        String token = DiscordPresenceConfig.getBotToken();
+        if (token.isBlank()) {
+            LOGGER.warn("relayDiscordToGame is on but botToken is blank — gateway not started.");
+            return;
+        }
+        LOGGER.info("Discord Presence: starting gateway…");
+        DiscordGateway gw = new DiscordGateway(token, this::onDiscordMessage);
+        this.gateway = gw;
+        gw.start();
+    }
+
+    /** Load the persisted player→thread map from the server config dir. */
+    private void loadThreads() {
         Path file = FMLPaths.CONFIGDIR.get().resolve(THREAD_STORE_FILE);
         threadStore.load(file);
     }
 
+    /** Drop per-session tracking and close the gateway on server stop (durable stores stay on disk). */
+    public void clearAll() {
+        DiscordGateway gw = gateway;
+        gateway = null;
+        if (gw != null) {
+            gw.stop();
+        }
+        sessionMessages.clear();
+        threadFutures.clear();
+        reverse.clear();
+        server = null;
+    }
+
+    // --- player events ---
+
     public void onPlayerJoin(ServerPlayer player) {
-        if (!enabled()) {
+        if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
         UUID uuid = player.getUUID();
@@ -81,7 +162,7 @@ public final class DiscordService {
         if (!DiscordPresenceConfig.isCreateThreadOnJoin()) {
             // Threads disabled: plain per-session top-level message + reactions (v0.1.0).
             String content = format(DiscordPresenceConfig.getJoinMessageTemplate(), name);
-            sessionMessages.put(uuid, postAndReact(content, name, uuid, null, onlineEmoji));
+            sessionMessages.put(uuid, postReactIndex(content, name, uuid, null, onlineEmoji));
             return;
         }
 
@@ -89,13 +170,13 @@ public final class DiscordService {
         if (existingThread != null) {
             // Returning player: post "started the game" INTO their thread.
             String content = format(DiscordPresenceConfig.getJoinMessageTemplate(), name);
-            sessionMessages.put(uuid, postAndReact(content, name, uuid, existingThread, onlineEmoji));
+            sessionMessages.put(uuid, postReactIndex(content, name, uuid, existingThread, onlineEmoji));
             threadFutures.put(uuid, CompletableFuture.completedFuture(existingThread));
             return;
         }
 
-        // First join ever: post the top-level anchor, react on it, and create the
-        // player's thread from it (persisting the id once it resolves).
+        // First join ever: post the top-level anchor, react on + index it, and create
+        // the player's thread from it (persisting the id once it resolves).
         String content = format(DiscordPresenceConfig.getFirstJoinMessageTemplate(), name);
         CompletableFuture<DiscordMessageRef> anchor =
                 DiscordWebhookClient.post(content, name, uuid, null);
@@ -103,6 +184,7 @@ public final class DiscordService {
         sessionMessages.put(uuid, anchor.thenApply(ref -> {
             if (ref != null) {
                 DiscordBotClient.addReaction(ref, onlineEmoji);
+                reverse.put(ref.messageId(), uuid);
             }
             return ref;
         }));
@@ -154,7 +236,7 @@ public final class DiscordService {
      * earned while the first-join thread is still being created still posts.
      */
     public void onAdvancement(ServerPlayer player, AdvancementHolder holder) {
-        if (!enabled() || !DiscordPresenceConfig.isCreateThreadOnJoin()) {
+        if (!enabled() || !networkAllowed(player.server) || !DiscordPresenceConfig.isCreateThreadOnJoin()) {
             return; // no thread to post into
         }
 
@@ -192,31 +274,85 @@ public final class DiscordService {
         });
     }
 
+    // --- two-way chat ---
+
+    /** game→Discord: relay one in-game chat line under the player's name, indexing the result. */
+    public void onGameChat(ServerPlayer player, String text) {
+        if (!enabled() || !networkAllowed(player.server) || !DiscordPresenceConfig.isRelayGameToDiscord()) {
+            return;
+        }
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        UUID uuid = player.getUUID();
+        String name = player.getGameProfile().getName();
+        DiscordWebhookClient.postChat(name, uuid, text).thenAccept(ref -> {
+            if (ref != null) {
+                reverse.put(ref.messageId(), uuid);
+            }
+        });
+    }
+
+    /**
+     * Discord→game: relay an inbound Discord message into in-game chat, but only when
+     * it is anchored to a tracked player message (a reply to it, or a message in the
+     * thread spun off it). Called off-thread by {@link DiscordGateway}; hops to the
+     * server thread before broadcasting.
+     */
+    public void onDiscordMessage(InboundMessage msg) {
+        if (msg != null) {
+            LOGGER.debug("Discord inbound: author={}, ref={}, channel={}, bot={}, webhook={}, anchored={}",
+                    msg.authorName(), msg.referencedMessageId(), msg.channelId(), msg.bot(), msg.hasWebhookId(),
+                    reverse.contains(msg.referencedMessageId()) || reverse.contains(msg.channelId()));
+        }
+        if (!isRelayable(msg, reverse)) {
+            return; // our own posts/bots, or not anchored to a tracked player message
+        }
+        String content = sanitize(msg.content());
+        if (content.isBlank()) {
+            if (warnedBlankContent.compareAndSet(false, true)) {
+                LOGGER.warn("A relayed Discord message had empty content — enable the 'Message Content' "
+                        + "privileged intent for the bot in the Discord Developer Portal.");
+            }
+            return;
+        }
+        String line = DiscordPresenceConfig.getDiscordToGameFormat()
+                .replace("{user}", sanitize(msg.authorName()))
+                .replace("{msg}", content);
+
+        MinecraftServer srv = server;
+        if (srv == null) {
+            return;
+        }
+        // Hop to the server thread; broadcast as a SYSTEM message (does not re-fire ServerChatEvent).
+        srv.execute(() -> srv.getPlayerList().broadcastSystemMessage(Component.literal(line), false));
+    }
+
+    // --- helpers ---
+
     /** The advancement frame's chat colour as a Discord embed colour (0xRRGGBB), or null. */
     private static Integer frameColor(DisplayInfo display) {
         ChatFormatting chatColor = display.getType().getChatColor();
         return chatColor != null ? chatColor.getColor() : null;
     }
 
-    /** Drop per-session tracking on server stop (the durable store stays on disk). */
-    public void clearAll() {
-        sessionMessages.clear();
-        threadFutures.clear();
-    }
-
-    // --- pure helpers (unit-tested) ---------------------------------------
-
-    /** Post {@code content} as the player (optionally into a thread) and add the online reaction. */
-    private static CompletableFuture<DiscordMessageRef> postAndReact(
+    /**
+     * Post {@code content} as the player (optionally into a thread), add the online
+     * reaction, and index the ref so a Discord reply to it routes back in-game.
+     */
+    private CompletableFuture<DiscordMessageRef> postReactIndex(
             String content, String name, UUID uuid, String threadId, String onlineEmoji) {
         return DiscordWebhookClient.post(content, name, uuid, threadId)
                 .thenApply(ref -> {
                     if (ref != null) {
                         DiscordBotClient.addReaction(ref, onlineEmoji);
+                        reverse.put(ref.messageId(), uuid);
                     }
                     return ref;
                 });
     }
+
+    // --- pure helpers (unit-tested) ---------------------------------------
 
     /**
      * Whether an advancement should be announced, given the configured filters.
@@ -228,6 +364,31 @@ public final class DiscordService {
             return false;
         }
         return allowedNamespaces.isEmpty() || allowedNamespaces.contains(namespace);
+    }
+
+    /**
+     * Pure relay decision: a non-bot, non-webhook message anchored to a tracked
+     * player message — a reply to it, or a message in the thread spun off it
+     * ({@code channelId} == that message's id). Extracted so it is unit-testable.
+     */
+    static boolean isRelayable(InboundMessage msg, PlayerMessageIndex index) {
+        if (msg == null || msg.isOwnOrBot()) {
+            return false;
+        }
+        return index.contains(msg.referencedMessageId()) || index.contains(msg.channelId());
+    }
+
+    /**
+     * Make Discord-supplied text safe for in-game display: single-line and length
+     * capped. {@link Component#literal} does not parse {@code §} colour codes, so no
+     * formatting/command injection is possible.
+     */
+    static String sanitize(String s) {
+        if (s == null) {
+            return "";
+        }
+        String t = s.replace('\n', ' ').replace('\r', ' ');
+        return t.length() > MAX_RELAY_CHARS ? t.substring(0, MAX_RELAY_CHARS) + "…" : t;
     }
 
     /** Replace {@code {player}} in a template. */

@@ -21,8 +21,9 @@ import java.util.concurrent.CompletableFuture;
  * so the bot can later react to it.
  *
  * <p>The same call posts either a top-level channel message (the first-join
- * anchor) or a message inside an existing thread (via {@code &thread_id=}),
- * keeping the per-player webhook username/avatar in both cases.</p>
+ * anchor or a relayed chat line) or a message inside an existing thread (via
+ * {@code &thread_id=}), keeping the per-player webhook username/avatar in both
+ * cases.</p>
  *
  * <p>Webhooks can only post/edit/delete their own messages — they cannot add
  * reactions or create threads (that's {@link DiscordBotClient} /
@@ -64,6 +65,15 @@ final class DiscordWebhookClient {
                     LOGGER.warn("Discord webhook POST failed: {}", t.toString());
                     return null;
                 });
+    }
+
+    /**
+     * Relays a line of in-game chat to Discord under the player's name + avatar
+     * (the game→Discord half of the two-way bridge). The returned ref is indexed
+     * by {@link DiscordService} so Discord replies/threads on it route back.
+     */
+    static CompletableFuture<DiscordMessageRef> postChat(String playerName, UUID uuid, String content) {
+        return post(content, playerName, uuid, null);
     }
 
     /**

@@ -19,10 +19,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * reaction needs only the token plus channel permissions (Add Reactions, Read
  * Message History); no gateway connection or privileged intents.</p>
  *
- * <p><b>Phase 2 (two-way chat) extension point:</b> reading Discord replies and
- * routing them back into in-game chat needs a persistent gateway (WebSocket)
- * connection + the Message Content privileged intent. That gateway client will
- * live here, reusing the same bot token.</p>
+ * <p><b>Two-way chat (Phase 2):</b> the persistent gateway (WebSocket) read path —
+ * reading Discord replies/threads and routing them back into in-game chat — is
+ * implemented in {@link DiscordGateway}, reusing this same bot token. This class
+ * remains the REST reaction client.</p>
  */
 final class DiscordBotClient {
 
