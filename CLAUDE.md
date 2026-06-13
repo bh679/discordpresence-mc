@@ -106,10 +106,43 @@ Read `.claude/gates/gate-3-merge.md` for the full procedure. Summary:
 ./gradlew --stop       # Stop the gradle daemon if a dev run hangs
 ```
 
+### Worktree / branch setup — Discord secrets
+
+Every git worktree (and the main checkout) has its **own gitignored `run/` directory**, so the
+webhook URL + bot token do **not** carry over to a fresh branch worktree — live Discord testing is
+silently disabled (a blank webhook turns the mod off) until they are present. The secrets live only
+in the runtime SERVER config and are **never committed**.
+
+When starting a new branch/worktree, copy the configured SERVER config from the main checkout
+(run from the new worktree root):
+
+```bash
+# Find the main checkout and copy its gitignored discordpresence-server.toml into this worktree.
+# run/ is gitignored, so the secrets are never committed.
+MAIN=$(git worktree list --porcelain | awk '/^worktree /{p=$2} $0=="branch refs/heads/main"{print p; exit}')
+mkdir -p run/config
+cp "$MAIN/run/config/discordpresence-server.toml" run/config/ \
+  && echo "✓ copied Discord secrets from main" \
+  || echo "⚠ no run/config/discordpresence-server.toml in main — add webhookUrl + botToken manually"
+# If it isn't in run/config/, locate it:  find "$MAIN/run" -name discordpresence-server.toml
+```
+
+Then confirm — **without printing the values** — that `webhookUrl` and `botToken` are non-blank,
+and `createThreadOnJoin = true` (plus `showAdvancementIcon = true` to test advancement-icon
+embeds):
+
+```bash
+grep -E 'webhookUrl|botToken|createThreadOnJoin|showAdvancementIcon' run/config/discordpresence-server.toml \
+  | sed -E 's/(webhookUrl|botToken) *=.*/\1 = <redacted, set>/'
+```
+
+NeoForge may log `…server.toml is not correct. Correcting` on first world load — that is benign
+comment/format normalization and it **preserves** the secret values.
+
 ### Manual Discord Testing
 
 For Gate 2 verification:
-1. Put a webhook URL / bot token in the gitignored SERVER config (`*-server.toml`, e.g. `run/serverconfig/discordpresence-server.toml`)
+1. Ensure the gitignored SERVER config has the secrets — `run/config/discordpresence-server.toml` (copy it from main via [Worktree / branch setup](#worktree--branch-setup--discord-secrets) above, or add `webhookUrl` / `botToken` by hand)
 2. `./gradlew runServer` (or `runClient`) — wait for it to start
 3. Join → confirm the join message + online reaction post to Discord; quit → confirm the online reaction clears; die → confirm the death reaction
 4. Discord is **best-effort**: failures are logged and swallowed, so check the server log for `discordpresence` warnings if nothing appears
