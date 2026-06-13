@@ -77,13 +77,15 @@ final class DiscordThreadClient {
 
     /**
      * Post an advancement message into the channel/thread as the bot: an optional
-     * {@code content} attribution line plus a coloured embed (title + description),
-     * the embed colour matching the in-game advancement frame.
+     * {@code content} attribution line plus a coloured embed (title + description,
+     * with an optional {@code iconUrl} thumbnail at the top-right), the embed colour
+     * matching the in-game advancement frame.
      *
      * @return a future of the posted message ref, or {@code null} on failure.
      */
     static CompletableFuture<DiscordMessageRef> postEmbed(String channelId, String content,
-                                                          String title, String description, Integer color) {
+                                                          String title, String description, Integer color,
+                                                          String iconUrl) {
         if (channelId == null) {
             return CompletableFuture.completedFuture(null);
         }
@@ -101,6 +103,11 @@ final class DiscordThreadClient {
         }
         if (color != null) {
             embed.addProperty("color", color); // 0xRRGGBB
+        }
+        if (iconUrl != null && !iconUrl.isBlank()) {
+            JsonObject thumbnail = new JsonObject();
+            thumbnail.addProperty("url", iconUrl);
+            embed.add("thumbnail", thumbnail); // ~80px image, top-right of the embed
         }
         JsonArray embeds = new JsonArray();
         embeds.add(embed);

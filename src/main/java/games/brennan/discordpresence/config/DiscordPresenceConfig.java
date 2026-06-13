@@ -27,6 +27,9 @@ public final class DiscordPresenceConfig {
     public static final String DEFAULT_THREAD_NAME_TEMPLATE = "{player}";
     public static final int DEFAULT_THREAD_AUTO_ARCHIVE_MINUTES = 10080; // 1 week
     public static final String DEFAULT_ADVANCEMENT_TEMPLATE = "{player} earned";
+    public static final boolean DEFAULT_SHOW_ADVANCEMENT_ICON = true;
+    public static final String DEFAULT_ADVANCEMENT_ICON_URL_TEMPLATE =
+            "https://static.minecraftitemids.com/64/{path}.png";
 
     public static final boolean DEFAULT_RELAY_DISCORD_TO_GAME = true;
     public static final boolean DEFAULT_RELAY_GAME_TO_DISCORD = true;
@@ -48,6 +51,8 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.ConfigValue<List<? extends String>> ADVANCEMENT_NAMESPACES;
     public static final ModConfigSpec.BooleanValue ONLY_DISPLAY_ADVANCEMENTS;
     public static final ModConfigSpec.ConfigValue<String> ADVANCEMENT_MESSAGE_TEMPLATE;
+    public static final ModConfigSpec.BooleanValue SHOW_ADVANCEMENT_ICON;
+    public static final ModConfigSpec.ConfigValue<String> ADVANCEMENT_ICON_URL_TEMPLATE;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -130,6 +135,17 @@ public final class DiscordPresenceConfig {
                          "colour: green for task/goal, purple for challenge), so this line is normally just the",
                          "attribution. '{player}' = player name, '{advancement}' = the advancement's display title.")
                 .define("advancementMessageTemplate", DEFAULT_ADVANCEMENT_TEMPLATE);
+        SHOW_ADVANCEMENT_ICON = b
+                .comment("Show the advancement's Minecraft icon as a thumbnail on the embed (top-right).",
+                         "The icon is the item/block the game displays for the advancement.")
+                .define("showAdvancementIcon", DEFAULT_SHOW_ADVANCEMENT_ICON);
+        ADVANCEMENT_ICON_URL_TEMPLATE = b
+                .comment("URL template for the advancement icon thumbnail. '{path}' = the icon item's id",
+                         "(e.g. 'stone'), '{namespace}' = its mod id (e.g. 'minecraft'). Discord fetches this",
+                         "URL; if it 404s the embed simply shows no icon. The default serves rendered VANILLA",
+                         "item/block icons only — for modded advancements, point this at your own render host,",
+                         "e.g. 'https://my-host/icons/{namespace}/{path}.png'.")
+                .define("advancementIconUrlTemplate", DEFAULT_ADVANCEMENT_ICON_URL_TEMPLATE);
         b.pop();
         SPEC = b.build();
     }
@@ -199,5 +215,13 @@ public final class DiscordPresenceConfig {
 
     public static String getAdvancementMessageTemplate() {
         return isLoaded() ? ADVANCEMENT_MESSAGE_TEMPLATE.get() : DEFAULT_ADVANCEMENT_TEMPLATE;
+    }
+
+    public static boolean isShowAdvancementIcon() {
+        return isLoaded() ? SHOW_ADVANCEMENT_ICON.get() : DEFAULT_SHOW_ADVANCEMENT_ICON;
+    }
+
+    public static String getAdvancementIconUrlTemplate() {
+        return isLoaded() ? ADVANCEMENT_ICON_URL_TEMPLATE.get() : DEFAULT_ADVANCEMENT_ICON_URL_TEMPLATE;
     }
 }
