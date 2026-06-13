@@ -71,4 +71,17 @@ class DiscordPresenceConfigSeamTest {
         assertEquals("https://relay/base/hook", DiscordPresenceConfig.getWebhookUrl());
         assertEquals("https://relay/base/bot", DiscordPresenceConfig.getBotApiBase());
     }
+
+    @Test
+    void providerCanSuppressAutoDeathReport() {
+        // No provider → DP's auto-death-report follows config (default true).
+        DiscordCredentials.register(null);
+        assertTrue(DiscordPresenceConfig.isAutoDeathReport());
+        // A bundling mod that posts its own death report suppresses DP's generic one.
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public boolean suppressAutoDeathReport() { return true; }
+        });
+        assertFalse(DiscordPresenceConfig.isAutoDeathReport());
+    }
 }

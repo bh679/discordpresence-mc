@@ -430,6 +430,10 @@ public final class DiscordPresenceConfig {
     }
 
     public static boolean isAutoDeathReport() {
+        // A bundling mod (e.g. Dungeon Train) that posts its own death report suppresses DP's generic one.
+        if (DiscordCredentials.providerSuppressAutoDeathReport()) {
+            return false;
+        }
         return isLoaded() ? AUTO_DEATH_REPORT.get() : DEFAULT_AUTO_DEATH_REPORT;
     }
 

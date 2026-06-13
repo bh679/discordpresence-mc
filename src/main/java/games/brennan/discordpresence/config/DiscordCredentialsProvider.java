@@ -44,4 +44,13 @@ public interface DiscordCredentialsProvider {
     default String relayBaseUrl() {
         return "";
     }
+
+    /**
+     * Whether DP should suppress its own generic auto-death-report (the {@code autoDeathReport}
+     * config) because the bundling mod posts its own richer death report via {@code DiscordService}'s
+     * {@code postDeathReport(...)}. Default false (DP's auto report fires as configured).
+     */
+    default boolean suppressAutoDeathReport() {
+        return false;
+    }
 }
