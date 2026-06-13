@@ -10,7 +10,10 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 /**
  * In-game "whispers into the darkness" auto-responses.
@@ -35,10 +38,20 @@ final class AutoResponder {
     /** Hard floor: never more than one auto-response per 30 seconds, whatever the config says. */
     private static final int MIN_COOLDOWN_SECONDS = 30;
 
+    /** Delay before the whisper shows, so it lands AFTER the player's own chat line. */
+    private static final long WHISPER_DELAY_MILLIS = 1000L;
+
     private final AutoResponseStore store = new AutoResponseStore();
 
     /** Per-player epoch-millis of the last whisper shown — the cooldown gate (transient). */
     private final ConcurrentHashMap<UUID, Long> lastWhisper = new ConcurrentHashMap<>();
+
+    /** Single daemon thread that delays the whisper so it lands after the player's chat line. */
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "DiscordPresence-AutoResponse");
+        t.setDaemon(true);
+        return t;
+    });
 
     /** Load the persisted disarm timestamps on server start (before any join). */
     void loadState(Path file) {
@@ -97,12 +110,18 @@ final class AutoResponder {
             return;
         }
         lastWhisper.put(uuid, now);
-        // Grey, like a system message. Deferred onto the server task queue so it lands
-        // AFTER the player's own chat line — the ServerChatEvent we're inside broadcasts
-        // that synchronously once handlers return. A system message never re-fires
-        // ServerChatEvent, so there is no relay loop.
+        // Grey, like a system message. Delayed ~1s and hopped back onto the server thread so it
+        // lands AFTER the player's own chat line — the modern chat broadcast is asynchronous, so
+        // an immediate server-thread enqueue still raced ahead of it. A system message never
+        // re-fires ServerChatEvent, so there is no relay loop.
         Component message = Component.literal(line).withStyle(ChatFormatting.GRAY);
-        server.execute(() -> server.getPlayerList().broadcastSystemMessage(message, false));
+        scheduler.schedule(() -> {
+            try {
+                server.execute(() -> server.getPlayerList().broadcastSystemMessage(message, false));
+            } catch (Exception ignored) {
+                // server stopped during the delay, etc. — best-effort flavour, never throw.
+            }
+        }, WHISPER_DELAY_MILLIS, TimeUnit.MILLISECONDS);
     }
 
     // --- pure helpers (unit-tested) ---------------------------------------
