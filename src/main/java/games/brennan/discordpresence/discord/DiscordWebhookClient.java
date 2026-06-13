@@ -16,35 +16,41 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Posts the join message through the configured Discord webhook and parses the
- * created message's {@code id} + {@code channel_id} from the {@code ?wait=true}
- * response, so the bot can later react to it.
+ * Posts a message through the configured Discord webhook and parses the created
+ * message's {@code id} + {@code channel_id} from the {@code ?wait=true} response,
+ * so the bot can later react to it.
+ *
+ * <p>The same call posts either a top-level channel message (the first-join
+ * anchor) or a message inside an existing thread (via {@code &thread_id=}),
+ * keeping the per-player webhook username/avatar in both cases.</p>
  *
  * <p>Webhooks can only post/edit/delete their own messages — they cannot add
- * reactions (that's {@link DiscordBotClient}'s job). Best-effort: every failure
- * resolves to {@code null}; it never throws into game logic.</p>
+ * reactions or create threads (that's {@link DiscordBotClient} /
+ * {@link DiscordThreadClient}). Best-effort: every failure resolves to
+ * {@code null}; it never throws into game logic.</p>
  */
 final class DiscordWebhookClient {
 
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final int DISCORD_GREEN = 0x57F287;
 
     private DiscordWebhookClient() {}
 
     /**
+     * Post {@code content} as the given player. When {@code threadId} is non-null
+     * the message lands inside that thread; otherwise it posts top-level.
+     *
      * @return a future of the posted message ref, completing with {@code null}
      *         when disabled or on any failure (callers tolerate null).
      */
-    static CompletableFuture<DiscordMessageRef> postJoinMessage(String playerName, UUID uuid) {
+    static CompletableFuture<DiscordMessageRef> post(String content, String playerName, UUID uuid, String threadId) {
         String webhookUrl = DiscordPresenceConfig.getWebhookUrl();
         if (webhookUrl.isBlank()) {
             return CompletableFuture.completedFuture(null);
         }
 
-        String content = DiscordPresenceConfig.getJoinMessageTemplate().replace("{player}", playerName);
         String body = buildPayload(content, playerName, uuid);
 
-        HttpRequest req = HttpRequest.newBuilder(URI.create(appendWait(webhookUrl)))
+        HttpRequest req = HttpRequest.newBuilder(URI.create(withQuery(webhookUrl, threadId)))
                 .header("Content-Type", "application/json")
                 .header("User-Agent", "DiscordPresence-Mod")
                 .timeout(DiscordHttp.TIMEOUT)
@@ -60,9 +66,18 @@ final class DiscordWebhookClient {
                 });
     }
 
-    /** {@code wait=true} makes Discord return the created message (with id + channel_id). */
-    private static String appendWait(String webhookUrl) {
-        return webhookUrl + (webhookUrl.contains("?") ? "&" : "?") + "wait=true";
+    /**
+     * {@code wait=true} makes Discord return the created message (with id +
+     * channel_id); {@code thread_id} (a numeric snowflake, safe unencoded) routes
+     * the post into an existing thread.
+     */
+    private static String withQuery(String webhookUrl, String threadId) {
+        StringBuilder sb = new StringBuilder(webhookUrl);
+        sb.append(webhookUrl.contains("?") ? "&" : "?").append("wait=true");
+        if (threadId != null && !threadId.isBlank()) {
+            sb.append("&thread_id=").append(threadId);
+        }
+        return sb.toString();
     }
 
     private static DiscordMessageRef parseMessageRef(HttpResponse<String> resp) {

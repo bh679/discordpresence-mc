@@ -22,3 +22,7 @@ run/
 # Local dev config — may contain a webhook URL / bot token. NEVER commit.
 *-server.toml
 *.local.toml
+
+# Runtime data — persistent player→thread map written at runtime. Not a secret,
+# but server-/run-local; never commit.
+discordpresence-threads.json
