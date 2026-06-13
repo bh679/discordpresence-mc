@@ -32,6 +32,15 @@ public final class DiscordPresenceConfig {
     public static final boolean DEFAULT_RELAY_GAME_TO_DISCORD = true;
     public static final String DEFAULT_DISCORD_TO_GAME_FORMAT = "<{user}> {msg}";
 
+    public static final boolean DEFAULT_AUTO_RESPONSE_ENABLED = true;
+    public static final int DEFAULT_AUTO_RESPONSE_REARM_MINUTES = 30;
+    public static final int DEFAULT_AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS = 30;
+    public static final int DEFAULT_AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS = 300;
+    public static final List<String> DEFAULT_AUTO_RESPONSE_ALONE_MESSAGES =
+            List.of("{player} whispers into the darkness, perhaps someone will respond...");
+    public static final List<String> DEFAULT_AUTO_RESPONSE_GROUP_MESSAGES =
+            List.of("{player} mutters to themselves...");
+
     public static final ModConfigSpec SPEC;
     public static final ModConfigSpec.ConfigValue<String> WEBHOOK_URL;
     public static final ModConfigSpec.ConfigValue<String> BOT_TOKEN;
@@ -48,6 +57,12 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.ConfigValue<List<? extends String>> ADVANCEMENT_NAMESPACES;
     public static final ModConfigSpec.BooleanValue ONLY_DISPLAY_ADVANCEMENTS;
     public static final ModConfigSpec.ConfigValue<String> ADVANCEMENT_MESSAGE_TEMPLATE;
+    public static final ModConfigSpec.BooleanValue AUTO_RESPONSE_ENABLED;
+    public static final ModConfigSpec.IntValue AUTO_RESPONSE_REARM_MINUTES;
+    public static final ModConfigSpec.IntValue AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_RESPONSE_ALONE_MESSAGES;
+    public static final ModConfigSpec.IntValue AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_RESPONSE_GROUP_MESSAGES;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -130,6 +145,37 @@ public final class DiscordPresenceConfig {
                          "attribution. '{player}' = player name, '{advancement}' = the advancement's display title.")
                 .define("advancementMessageTemplate", DEFAULT_ADVANCEMENT_TEMPLATE);
         b.pop();
+
+        b.push("autoResponse");
+        AUTO_RESPONSE_ENABLED = b
+                .comment("Show an in-game flavour line when a player chats while no Discord conversation is",
+                         "active (\"whispering into the darkness\"). Purely in-game — it posts nothing new to",
+                         "Discord; the chat line itself still relays via relayGameToDiscord. Turns off once a",
+                         "Discord reply reaches the server, re-arming after rearmMinutes of silence.")
+                .define("enabled", DEFAULT_AUTO_RESPONSE_ENABLED);
+        AUTO_RESPONSE_REARM_MINUTES = b
+                .comment("Minutes of Discord silence (no relayed reply for that player) before auto-responses",
+                         "re-arm. For local games this is remembered across worlds.")
+                .defineInRange("rearmMinutes", DEFAULT_AUTO_RESPONSE_REARM_MINUTES, 1, 525_600);
+        AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS = b
+                .comment("Minimum seconds between auto-responses while the player is ALONE (no other players",
+                         "online). 0 = every chat message.")
+                .defineInRange("aloneCooldownSeconds", DEFAULT_AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS, 0, 86_400);
+        AUTO_RESPONSE_ALONE_MESSAGES = b
+                .comment("Flavour lines used when the player is ALONE; one is chosen at random.",
+                         "'{player}' is replaced with the player's name. Empty list = no alone auto-response.")
+                .defineListAllowEmpty("aloneMessages", () -> DEFAULT_AUTO_RESPONSE_ALONE_MESSAGES, () -> "",
+                        o -> o instanceof String);
+        AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS = b
+                .comment("Minimum seconds between auto-responses while OTHER players are online.")
+                .defineInRange("groupCooldownSeconds", DEFAULT_AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS, 0, 86_400);
+        AUTO_RESPONSE_GROUP_MESSAGES = b
+                .comment("Flavour lines used when OTHER players are online; one is chosen at random.",
+                         "'{player}' is replaced with the player's name. Empty list = no group auto-response.")
+                .defineListAllowEmpty("groupMessages", () -> DEFAULT_AUTO_RESPONSE_GROUP_MESSAGES, () -> "",
+                        o -> o instanceof String);
+        b.pop();
+
         SPEC = b.build();
     }
 
@@ -198,5 +244,29 @@ public final class DiscordPresenceConfig {
 
     public static String getAdvancementMessageTemplate() {
         return isLoaded() ? ADVANCEMENT_MESSAGE_TEMPLATE.get() : DEFAULT_ADVANCEMENT_TEMPLATE;
+    }
+
+    public static boolean isAutoResponseEnabled() {
+        return isLoaded() ? AUTO_RESPONSE_ENABLED.get() : DEFAULT_AUTO_RESPONSE_ENABLED;
+    }
+
+    public static int getAutoResponseRearmMinutes() {
+        return isLoaded() ? AUTO_RESPONSE_REARM_MINUTES.get() : DEFAULT_AUTO_RESPONSE_REARM_MINUTES;
+    }
+
+    public static int getAutoResponseAloneCooldownSeconds() {
+        return isLoaded() ? AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS.get() : DEFAULT_AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS;
+    }
+
+    public static List<? extends String> getAutoResponseAloneMessages() {
+        return isLoaded() ? AUTO_RESPONSE_ALONE_MESSAGES.get() : DEFAULT_AUTO_RESPONSE_ALONE_MESSAGES;
+    }
+
+    public static int getAutoResponseGroupCooldownSeconds() {
+        return isLoaded() ? AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS.get() : DEFAULT_AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS;
+    }
+
+    public static List<? extends String> getAutoResponseGroupMessages() {
+        return isLoaded() ? AUTO_RESPONSE_GROUP_MESSAGES.get() : DEFAULT_AUTO_RESPONSE_GROUP_MESSAGES;
     }
 }
