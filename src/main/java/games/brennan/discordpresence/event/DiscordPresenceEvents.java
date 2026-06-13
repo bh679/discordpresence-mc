@@ -48,7 +48,7 @@ public final class DiscordPresenceEvents {
     @SubscribeEvent
     public static void onDeath(LivingDeathEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            DiscordService.get().onPlayerDeath(player.getUUID());
+            DiscordService.get().onPlayerDeath(player, event.getSource());
         }
     }
 

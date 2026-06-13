@@ -79,6 +79,70 @@ final class DiscordWebhookClient {
     }
 
     /**
+     * Post a single {@code embed} as the given player (optionally into a thread),
+     * with an optional composed PNG attached and referenced as the embed's image.
+     * When {@code png} is non-null the request is {@code multipart/form-data}
+     * (payload_json + the file); otherwise it is plain JSON. Uses {@code ?wait=true}
+     * so the created message's ref comes back.
+     *
+     * @return a future of the posted message ref, {@code null} when disabled or on failure.
+     */
+    static CompletableFuture<DiscordMessageRef> postReport(String playerName, UUID uuid, String threadId,
+                                                           JsonObject embed, byte[] png, String filename) {
+        String webhookUrl = DiscordPresenceConfig.getWebhookUrl();
+        if (webhookUrl.isBlank()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        if (png != null && filename != null) {
+            JsonObject image = new JsonObject();
+            image.addProperty("url", "attachment://" + filename);
+            embed.add("image", image);
+        }
+
+        JsonObject root = new JsonObject();
+        String username = safeUsername(playerName);
+        if (username != null) {
+            root.addProperty("username", username);
+        }
+        root.addProperty("avatar_url", "https://mc-heads.net/avatar/" + uuid + "/64");
+        JsonArray embeds = new JsonArray();
+        embeds.add(embed);
+        root.add("embeds", embeds);
+        // Never ping anyone from a player-controlled name/template.
+        JsonObject allowedMentions = new JsonObject();
+        allowedMentions.add("parse", new JsonArray());
+        root.add("allowed_mentions", allowedMentions);
+
+        String url = withQuery(webhookUrl, threadId);
+        HttpRequest req;
+        if (png != null) {
+            String boundary = "DPBoundary" + UUID.randomUUID().toString().replace("-", "");
+            MultipartBody mb = MultipartBody.jsonWithPng(boundary, root.toString(), "files[0]", filename, png);
+            req = HttpRequest.newBuilder(URI.create(url))
+                    .header("Content-Type", mb.contentType())
+                    .header("User-Agent", "DiscordPresence-Mod")
+                    .timeout(DiscordHttp.TIMEOUT)
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(mb.body()))
+                    .build();
+        } else {
+            req = HttpRequest.newBuilder(URI.create(url))
+                    .header("Content-Type", "application/json")
+                    .header("User-Agent", "DiscordPresence-Mod")
+                    .timeout(DiscordHttp.TIMEOUT)
+                    .POST(HttpRequest.BodyPublishers.ofString(root.toString(), StandardCharsets.UTF_8))
+                    .build();
+        }
+
+        return DiscordHttp.CLIENT
+                .sendAsync(req, HttpResponse.BodyHandlers.ofString())
+                .thenApply(DiscordWebhookClient::parseMessageRef)
+                .exceptionally(t -> {
+                    LOGGER.warn("Discord webhook report POST failed: {}", t.toString());
+                    return null;
+                });
+    }
+
+    /**
      * {@code wait=true} makes Discord return the created message (with id +
      * channel_id); {@code thread_id} (a numeric snowflake, safe unencoded) routes
      * the post into an existing thread.
