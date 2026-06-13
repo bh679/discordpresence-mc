@@ -22,44 +22,42 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Orchestrates Discord Presence: posts the join message, maintains one persistent
- * thread per player, manages the online/death reactions, announces advancements in
- * the thread, and bridges chat both ways. The single entry point the event
- * subscribers delegate to.
+ * Orchestrates Discord Presence end-to-end: posts the join message, maintains one
+ * persistent thread per player, manages the online/death reactions, announces
+ * advancements in the thread, and bridges chat both ways. The single entry point
+ * the event subscribers delegate to.
  *
- * <p>Two per-player maps hold <i>futures</i>, not resolved values, so events that
- * fire before a webhook POST / thread creation completes still chain correctly:</p>
+ * <p><b>Per-player state</b> — two maps hold <i>futures</i>, not resolved values,
+ * so events that fire before a webhook POST / thread creation completes still
+ * chain correctly:</p>
  * <ul>
  *   <li>{@code sessionMessages} — this session's join message (the first-join
- *       anchor, or the in-thread "started" message). Carries the online/death
- *       reactions; cleared on logout.</li>
- *   <li>{@code threadFutures} — the player's thread id, so an advancement earned
- *       while the first-join thread is still being created still lands once it
- *       resolves. Backed by the durable {@link DiscordThreadStore}.</li>
+ *       anchor, or the in-thread "started" message); carries the online/death
+ *       reactions, cleared on logout.</li>
+ *   <li>{@code threadFutures} — the player's thread id, backed by the durable
+ *       {@link DiscordThreadStore}, so an advancement earned while the first-join
+ *       thread is still being created still lands once it resolves.</li>
  * </ul>
  *
  * <p><b>Two-way chat.</b> game→Discord relays each {@code ServerChatEvent} line
- * through the webhook under the player's name. Discord→game runs a persistent
- * {@link DiscordGateway}: a Discord message is relayed in only when it is
- * <i>anchored</i> to a message the mod posted for a player — a reply to it, or a
- * message in the thread spun off it — resolved via {@link PlayerMessageIndex}
- * (messageId → UUID; a message-thread's id equals its source message id, so a reply
- * and a thread message are the same lookup). Inbound delivery hops to the server
- * thread and broadcasts as a system message, so it never re-fires
- * {@code ServerChatEvent} (no relay loop).</p>
+ * through the webhook under the player's name (into their thread when they have
+ * one). Discord→game runs a persistent {@link DiscordGateway}: a Discord message
+ * is relayed in only when it is <i>anchored</i> to something the mod posted for a
+ * player — a reply to one of our messages, or a message in the player's thread —
+ * resolved via {@link PlayerMessageIndex} (a message-thread's id equals its source
+ * message id, so a reply and a thread message are the same lookup). Inbound
+ * delivery hops to the server thread and broadcasts a system message, so it never
+ * re-fires {@code ServerChatEvent} (no relay loop).</p>
  *
  * <p><b>Network gate.</b> On a dedicated server the relay is on by default; in
  * singleplayer all Discord network use waits on the one-time client consent.</p>
- *
- * <p>Continuations run on the HTTP executor; the server thread only ever enqueues
- * non-blocking work.</p>
  */
 public final class DiscordService {
 
     private static final Logger LOGGER = LogUtils.getLogger();
+    private static final int MAX_RELAY_CHARS = 256;
     private static final String THREAD_STORE_FILE = "discordpresence-threads.json";
     private static final String AUTO_RESPONSE_STORE_FILE = "discordpresence-autoresponse.json";
-    private static final int MAX_RELAY_CHARS = 256;
 
     private static final DiscordService INSTANCE = new DiscordService();
 
@@ -73,7 +71,7 @@ public final class DiscordService {
     private final ConcurrentHashMap<UUID, CompletableFuture<String>> threadFutures =
             new ConcurrentHashMap<>();
 
-    /** messageId → owning player, for every message we post on a player's behalf (join + relayed chat). */
+    /** messageId / threadId → owning player, for everything we post on a player's behalf. */
     private final PlayerMessageIndex reverse = new PlayerMessageIndex();
 
     /** In-game "whispers into the darkness" auto-responses — game-side only, no Discord I/O. */
@@ -93,9 +91,9 @@ public final class DiscordService {
     }
 
     /**
-     * Whether the mod may use the network in the current context. Dedicated servers
-     * are always allowed (opt out via config); singleplayer / LAN waits on the
-     * one-time client consent.
+     * Whether the mod may use the network in the current context. Dedicated
+     * servers are always allowed (opt out via config); singleplayer / LAN waits
+     * on the one-time client consent.
      */
     private boolean networkAllowed(MinecraftServer srv) {
         if (srv == null) {
@@ -109,13 +107,15 @@ public final class DiscordService {
 
     // --- server lifecycle ---
 
-    /**
-     * On server start: load the persisted player→thread map (before any join), then
-     * open the gateway when inbound relay is enabled, consented and a token is set.
-     */
+    /** Load the persisted player→thread map on server start (before any join). */
+    public void loadThreads() {
+        Path file = FMLPaths.CONFIGDIR.get().resolve(THREAD_STORE_FILE);
+        threadStore.load(file);
+    }
+
+    /** Opens the gateway (if inbound relay is enabled and consented) once the server is up. */
     public void onServerStarted(MinecraftServer startedServer) {
         this.server = startedServer;
-        loadThreads();
         autoResponder.loadState(FMLPaths.CONFIGDIR.get().resolve(AUTO_RESPONSE_STORE_FILE));
         LOGGER.info("Discord Presence onServerStarted: dedicated={}, webhookSet={}, consent={}, relayDiscordToGame={}, botTokenSet={}",
                 startedServer.isDedicatedServer(), enabled(),
@@ -135,26 +135,6 @@ public final class DiscordService {
         gw.start();
     }
 
-    /** Load the persisted player→thread map from the server config dir. */
-    private void loadThreads() {
-        Path file = FMLPaths.CONFIGDIR.get().resolve(THREAD_STORE_FILE);
-        threadStore.load(file);
-    }
-
-    /** Drop per-session tracking and close the gateway on server stop (durable stores stay on disk). */
-    public void clearAll() {
-        DiscordGateway gw = gateway;
-        gateway = null;
-        if (gw != null) {
-            gw.stop();
-        }
-        sessionMessages.clear();
-        threadFutures.clear();
-        reverse.clear();
-        autoResponder.clear();
-        server = null;
-    }
-
     // --- player events ---
 
     public void onPlayerJoin(ServerPlayer player) {
@@ -166,23 +146,26 @@ public final class DiscordService {
         String onlineEmoji = DiscordPresenceConfig.getOnlineEmoji();
 
         if (!DiscordPresenceConfig.isCreateThreadOnJoin()) {
-            // Threads disabled: plain per-session top-level message + reactions (v0.1.0).
+            // Threads disabled: plain per-session top-level message + reactions (v0.1.0 behaviour).
             String content = format(DiscordPresenceConfig.getJoinMessageTemplate(), name);
-            sessionMessages.put(uuid, postReactIndex(content, name, uuid, null, onlineEmoji));
+            sessionMessages.put(uuid, trackForReplies(postAndReact(content, name, uuid, null, onlineEmoji), uuid));
             return;
         }
 
         String existingThread = threadStore.get(uuid);
         if (existingThread != null) {
-            // Returning player: post "started the game" INTO their thread.
+            // Returning player: post "started the game" INTO their thread. Index the thread id so
+            // replies / messages there route back in-game.
+            reverse.put(existingThread, uuid);
             String content = format(DiscordPresenceConfig.getJoinMessageTemplate(), name);
-            sessionMessages.put(uuid, postReactIndex(content, name, uuid, existingThread, onlineEmoji));
+            sessionMessages.put(uuid,
+                    trackForReplies(postAndReact(content, name, uuid, existingThread, onlineEmoji), uuid));
             threadFutures.put(uuid, CompletableFuture.completedFuture(existingThread));
             return;
         }
 
-        // First join ever: post the top-level anchor, react on + index it, and create
-        // the player's thread from it (persisting the id once it resolves).
+        // First join ever: post the top-level anchor, react on it, index it (its id == the thread
+        // id), and create the player's thread from it (persisting the id once it resolves).
         String content = format(DiscordPresenceConfig.getFirstJoinMessageTemplate(), name);
         CompletableFuture<DiscordMessageRef> anchor =
                 DiscordWebhookClient.post(content, name, uuid, null);
@@ -204,6 +187,7 @@ public final class DiscordService {
                 .thenApply(threadId -> {
                     if (threadId != null) {
                         threadStore.put(uuid, threadId);
+                        reverse.put(threadId, uuid); // thread id == anchor message id → anchors inbound routing
                     }
                     return threadId;
                 });
@@ -236,53 +220,9 @@ public final class DiscordService {
         });
     }
 
-    /**
-     * Announce an earned advancement in the player's thread (when it passes the
-     * namespace/display filter). Chains on the thread future, so an advancement
-     * earned while the first-join thread is still being created still posts.
-     */
-    public void onAdvancement(ServerPlayer player, AdvancementHolder holder) {
-        if (!enabled() || !networkAllowed(player.server) || !DiscordPresenceConfig.isCreateThreadOnJoin()) {
-            return; // no thread to post into
-        }
-
-        String namespace = holder.id().getNamespace();
-        Optional<DisplayInfo> display = holder.value().display();
-        Set<String> allowed = new HashSet<>(DiscordPresenceConfig.getAdvancementNamespaces());
-        boolean onlyDisplay = DiscordPresenceConfig.isOnlyDisplayAdvancements();
-        if (!shouldPostAdvancement(namespace, display.isPresent(), allowed, onlyDisplay)) {
-            return;
-        }
-
-        UUID uuid = player.getUUID();
-        CompletableFuture<String> threadFuture = threadFutures.get(uuid);
-        if (threadFuture == null) {
-            String existing = threadStore.get(uuid);
-            if (existing == null) {
-                return; // no thread, and none in flight
-            }
-            threadFuture = CompletableFuture.completedFuture(existing);
-        }
-
-        // Title + full description + frame colour come from the advancement's display
-        // (rendered as a coloured embed); the content line is the configurable attribution.
-        String title = display.map(d -> d.getTitle().getString()).orElse(holder.id().toString());
-        String description = display.map(d -> d.getDescription().getString()).orElse("");
-        Integer color = display.map(DiscordService::frameColor).orElse(null);
-        String content = formatAdvancement(
-                DiscordPresenceConfig.getAdvancementMessageTemplate(),
-                player.getGameProfile().getName(), title);
-
-        threadFuture.thenAccept(threadId -> {
-            if (threadId != null) {
-                DiscordThreadClient.postEmbed(threadId, content, title, description, color);
-            }
-        });
-    }
-
     // --- two-way chat ---
 
-    /** game→Discord: relay one in-game chat line under the player's name, indexing the result. */
+    /** game→Discord: relay one in-game chat line under the player's name, into their thread when they have one. */
     public void onGameChat(ServerPlayer player, String text) {
         if (!enabled() || !networkAllowed(player.server) || !DiscordPresenceConfig.isRelayGameToDiscord()) {
             return;
@@ -292,7 +232,8 @@ public final class DiscordService {
         }
         UUID uuid = player.getUUID();
         String name = player.getGameProfile().getName();
-        DiscordWebhookClient.postChat(name, uuid, text).thenAccept(ref -> {
+        String threadId = threadStore.get(uuid); // into the player's thread if they have one (null → top-level)
+        DiscordWebhookClient.postChat(name, uuid, text, threadId).thenAccept(ref -> {
             if (ref != null) {
                 reverse.put(ref.messageId(), uuid);
             }
@@ -302,10 +243,10 @@ public final class DiscordService {
     }
 
     /**
-     * Discord→game: relay an inbound Discord message into in-game chat, but only when
-     * it is anchored to a tracked player message (a reply to it, or a message in the
-     * thread spun off it). Called off-thread by {@link DiscordGateway}; hops to the
-     * server thread before broadcasting.
+     * Discord→game: relay an inbound Discord message into in-game chat, but only
+     * when it is anchored to a tracked player message (a reply to it, or a message
+     * in the player's thread). Called off-thread by {@link DiscordGateway}; hops to
+     * the server thread before broadcasting.
      */
     public void onDiscordMessage(InboundMessage msg) {
         if (msg != null) {
@@ -344,44 +285,6 @@ public final class DiscordService {
         srv.execute(() -> srv.getPlayerList().broadcastSystemMessage(Component.literal(line), false));
     }
 
-    // --- helpers ---
-
-    /** The advancement frame's chat colour as a Discord embed colour (0xRRGGBB), or null. */
-    private static Integer frameColor(DisplayInfo display) {
-        ChatFormatting chatColor = display.getType().getChatColor();
-        return chatColor != null ? chatColor.getColor() : null;
-    }
-
-    /**
-     * Post {@code content} as the player (optionally into a thread), add the online
-     * reaction, and index the ref so a Discord reply to it routes back in-game.
-     */
-    private CompletableFuture<DiscordMessageRef> postReactIndex(
-            String content, String name, UUID uuid, String threadId, String onlineEmoji) {
-        return DiscordWebhookClient.post(content, name, uuid, threadId)
-                .thenApply(ref -> {
-                    if (ref != null) {
-                        DiscordBotClient.addReaction(ref, onlineEmoji);
-                        reverse.put(ref.messageId(), uuid);
-                    }
-                    return ref;
-                });
-    }
-
-    // --- pure helpers (unit-tested) ---------------------------------------
-
-    /**
-     * Whether an advancement should be announced, given the configured filters.
-     * {@code allowedNamespaces} empty = all namespaces.
-     */
-    static boolean shouldPostAdvancement(String namespace, boolean hasDisplay,
-                                         Set<String> allowedNamespaces, boolean onlyDisplay) {
-        if (onlyDisplay && !hasDisplay) {
-            return false;
-        }
-        return allowedNamespaces.isEmpty() || allowedNamespaces.contains(namespace);
-    }
-
     /**
      * Pure relay decision: a non-bot, non-webhook message anchored to a tracked
      * player message — a reply to it, or a message in the thread spun off it
@@ -396,8 +299,8 @@ public final class DiscordService {
 
     /**
      * Make Discord-supplied text safe for in-game display: single-line and length
-     * capped. {@link Component#literal} does not parse {@code §} colour codes, so no
-     * formatting/command injection is possible.
+     * capped. {@link Component#literal} does not parse {@code §} colour codes, so
+     * no formatting/command injection is possible.
      */
     static String sanitize(String s) {
         if (s == null) {
@@ -405,6 +308,102 @@ public final class DiscordService {
         }
         String t = s.replace('\n', ' ').replace('\r', ' ');
         return t.length() > MAX_RELAY_CHARS ? t.substring(0, MAX_RELAY_CHARS) + "…" : t;
+    }
+
+    // --- advancements ---
+
+    /**
+     * Announce an earned advancement in the player's thread (when it passes the
+     * namespace/display filter). Chains on the thread future, so an advancement
+     * earned while the first-join thread is still being created still posts.
+     */
+    public void onAdvancement(ServerPlayer player, AdvancementHolder holder) {
+        if (!enabled() || !DiscordPresenceConfig.isCreateThreadOnJoin()) {
+            return; // no thread to post into
+        }
+
+        String namespace = holder.id().getNamespace();
+        Optional<DisplayInfo> display = holder.value().display();
+        Set<String> allowed = new HashSet<>(DiscordPresenceConfig.getAdvancementNamespaces());
+        boolean onlyDisplay = DiscordPresenceConfig.isOnlyDisplayAdvancements();
+        if (!shouldPostAdvancement(namespace, display.isPresent(), allowed, onlyDisplay)) {
+            return;
+        }
+
+        UUID uuid = player.getUUID();
+        CompletableFuture<String> threadFuture = threadFutures.get(uuid);
+        if (threadFuture == null) {
+            String existing = threadStore.get(uuid);
+            if (existing == null) {
+                return; // no thread, and none in flight
+            }
+            threadFuture = CompletableFuture.completedFuture(existing);
+        }
+
+        // Title + full description + frame colour come from the advancement's display
+        // (rendered as a coloured embed); the content line is the configurable attribution.
+        String title = display.map(d -> d.getTitle().getString()).orElse(holder.id().toString());
+        String description = display.map(d -> d.getDescription().getString()).orElse("");
+        Integer color = display.map(DiscordService::frameColor).orElse(null);
+        String content = formatAdvancement(
+                DiscordPresenceConfig.getAdvancementMessageTemplate(),
+                player.getGameProfile().getName(), title);
+
+        threadFuture.thenAccept(threadId -> {
+            if (threadId != null) {
+                DiscordThreadClient.postEmbed(threadId, content, title, description, color);
+            }
+        });
+    }
+
+    /** Drop per-session tracking + close the gateway on server stop (the durable store stays on disk). */
+    public void clearAll() {
+        DiscordGateway gw = gateway;
+        gateway = null;
+        if (gw != null) {
+            gw.stop();
+        }
+        sessionMessages.clear();
+        threadFutures.clear();
+        reverse.clear();
+        autoResponder.clear();
+        server = null;
+    }
+
+    // --- pure helpers (unit-tested) ---------------------------------------
+
+    /** Index a posted message's id → player once it resolves, so Discord replies to it route back. */
+    private CompletableFuture<DiscordMessageRef> trackForReplies(CompletableFuture<DiscordMessageRef> future, UUID uuid) {
+        return future.thenApply(ref -> {
+            if (ref != null) {
+                reverse.put(ref.messageId(), uuid);
+            }
+            return ref;
+        });
+    }
+
+    /** Post {@code content} as the player (optionally into a thread) and add the online reaction. */
+    private static CompletableFuture<DiscordMessageRef> postAndReact(
+            String content, String name, UUID uuid, String threadId, String onlineEmoji) {
+        return DiscordWebhookClient.post(content, name, uuid, threadId)
+                .thenApply(ref -> {
+                    if (ref != null) {
+                        DiscordBotClient.addReaction(ref, onlineEmoji);
+                    }
+                    return ref;
+                });
+    }
+
+    /**
+     * Whether an advancement should be announced, given the configured filters.
+     * {@code allowedNamespaces} empty = all namespaces.
+     */
+    static boolean shouldPostAdvancement(String namespace, boolean hasDisplay,
+                                         Set<String> allowedNamespaces, boolean onlyDisplay) {
+        if (onlyDisplay && !hasDisplay) {
+            return false;
+        }
+        return allowedNamespaces.isEmpty() || allowedNamespaces.contains(namespace);
     }
 
     /** Replace {@code {player}} in a template. */
@@ -415,5 +414,11 @@ public final class DiscordService {
     /** Replace {@code {player}} and {@code {advancement}} in a template. */
     static String formatAdvancement(String template, String player, String advancement) {
         return template.replace("{player}", player).replace("{advancement}", advancement);
+    }
+
+    /** The advancement frame's chat colour as a Discord embed colour (0xRRGGBB), or null. */
+    private static Integer frameColor(DisplayInfo display) {
+        ChatFormatting chatColor = display.getType().getChatColor();
+        return chatColor != null ? chatColor.getColor() : null;
     }
 }

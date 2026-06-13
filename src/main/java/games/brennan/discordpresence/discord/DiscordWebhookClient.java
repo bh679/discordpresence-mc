@@ -37,8 +37,19 @@ final class DiscordWebhookClient {
     private DiscordWebhookClient() {}
 
     /**
-     * Post {@code content} as the given player. When {@code threadId} is non-null
-     * the message lands inside that thread; otherwise it posts top-level.
+     * Relays a line of in-game chat to Discord under the player's name + avatar
+     * (the game→Discord half of the two-way bridge), into the player's thread when
+     * {@code threadId} is non-null. The returned ref is indexed by
+     * {@link DiscordService} so Discord replies/threads on it route back.
+     */
+    static CompletableFuture<DiscordMessageRef> postChat(String playerName, UUID uuid, String content, String threadId) {
+        return post(content, playerName, uuid, threadId);
+    }
+
+    /**
+     * Post {@code content} as the given player. When {@code threadId} is non-null the
+     * message lands inside that thread; otherwise it posts top-level. Uses
+     * {@code ?wait=true} so Discord returns the created message's id + channel_id.
      *
      * @return a future of the posted message ref, completing with {@code null}
      *         when disabled or on any failure (callers tolerate null).
@@ -65,15 +76,6 @@ final class DiscordWebhookClient {
                     LOGGER.warn("Discord webhook POST failed: {}", t.toString());
                     return null;
                 });
-    }
-
-    /**
-     * Relays a line of in-game chat to Discord under the player's name + avatar
-     * (the game→Discord half of the two-way bridge). The returned ref is indexed
-     * by {@link DiscordService} so Discord replies/threads on it route back.
-     */
-    static CompletableFuture<DiscordMessageRef> postChat(String playerName, UUID uuid, String content) {
-        return post(content, playerName, uuid, null);
     }
 
     /**

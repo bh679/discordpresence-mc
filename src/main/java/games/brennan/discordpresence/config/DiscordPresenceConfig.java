@@ -98,13 +98,14 @@ public final class DiscordPresenceConfig {
         RELAY_DISCORD_TO_GAME = b
                 .comment("Relay messages from Discord into in-game chat. Requires the bot token AND the",
                          "Message Content privileged intent enabled in the Discord Developer Portal.",
-                         "Only messages that REPLY to — or are posted in a THREAD started from — a message",
-                         "this mod posted for a player (the join notice or a relayed chat line) are relayed.",
+                         "Only messages that REPLY to — or are posted in a player's THREAD (or a thread started",
+                         "from a message this mod posted for them, e.g. a relayed chat line) are relayed.",
                          "On a dedicated server this is on by default; in singleplayer it also needs the",
                          "one-time in-game network confirmation.")
                 .define("relayDiscordToGame", DEFAULT_RELAY_DISCORD_TO_GAME);
         RELAY_GAME_TO_DISCORD = b
-                .comment("Relay in-game chat to Discord through the webhook, posted under each player's name.")
+                .comment("Relay in-game chat to Discord through the webhook, posted under each player's name",
+                         "(into their thread when they have one).")
                 .define("relayGameToDiscord", DEFAULT_RELAY_GAME_TO_DISCORD);
         DISCORD_TO_GAME_FORMAT = b
                 .comment("Format for a relayed Discord message shown in-game.",
