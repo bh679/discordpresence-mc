@@ -31,6 +31,12 @@ public final class DiscordPresenceConfig {
     public static final String DEFAULT_ADVANCEMENT_ICON_URL_TEMPLATE =
             "https://static.minecraftitemids.com/64/{path}.png";
 
+    public static final boolean DEFAULT_AUTO_DEATH_REPORT = true;
+    public static final int DEFAULT_DEATH_REPORT_EMBED_COLOR = 0xFF5555; // death-red
+    public static final boolean DEFAULT_SHOW_DEATH_REPORT_IMAGE = true;
+    public static final String DEFAULT_DEATH_REPORT_ICON_URL_TEMPLATE =
+            "https://static.minecraftitemids.com/64/{path}.png";
+
     public static final boolean DEFAULT_RELAY_DISCORD_TO_GAME = true;
     public static final boolean DEFAULT_RELAY_GAME_TO_DISCORD = true;
     public static final String DEFAULT_DISCORD_TO_GAME_FORMAT = "<{user}> {msg}";
@@ -53,6 +59,10 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.ConfigValue<String> ADVANCEMENT_MESSAGE_TEMPLATE;
     public static final ModConfigSpec.BooleanValue SHOW_ADVANCEMENT_ICON;
     public static final ModConfigSpec.ConfigValue<String> ADVANCEMENT_ICON_URL_TEMPLATE;
+    public static final ModConfigSpec.BooleanValue AUTO_DEATH_REPORT;
+    public static final ModConfigSpec.IntValue DEATH_REPORT_EMBED_COLOR;
+    public static final ModConfigSpec.BooleanValue SHOW_DEATH_REPORT_IMAGE;
+    public static final ModConfigSpec.ConfigValue<String> DEATH_REPORT_ICON_URL_TEMPLATE;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -146,6 +156,26 @@ public final class DiscordPresenceConfig {
                          "item/block icons only — for modded advancements, point this at your own render host,",
                          "e.g. 'https://my-host/icons/{namespace}/{path}.png'.")
                 .define("advancementIconUrlTemplate", DEFAULT_ADVANCEMENT_ICON_URL_TEMPLATE);
+        AUTO_DEATH_REPORT = b
+                .comment("Post a rich 'death report' embed when a player dies: the death cause, basic stats",
+                         "(score, location, dimension, XP) and a composed image of the items they were holding",
+                         "and wearing. This is IN ADDITION to the death emoji reaction. When a bundling mod",
+                         "(e.g. Dungeon Train) drives its own death report via the public API, set this false",
+                         "to avoid a duplicate post.")
+                .define("autoDeathReport", DEFAULT_AUTO_DEATH_REPORT);
+        DEATH_REPORT_EMBED_COLOR = b
+                .comment("Embed colour for the death report, as a decimal 0xRRGGBB value (default 0xFF5555, a death-red).")
+                .defineInRange("deathReportEmbedColor", DEFAULT_DEATH_REPORT_EMBED_COLOR, 0x000000, 0xFFFFFF);
+        SHOW_DEATH_REPORT_IMAGE = b
+                .comment("Compose the death report's items (weapon/armor/held) into a single image and attach it.",
+                         "Disable to post only the text fields (no image, no icon fetching).")
+                .define("showDeathReportImage", DEFAULT_SHOW_DEATH_REPORT_IMAGE);
+        DEATH_REPORT_ICON_URL_TEMPLATE = b
+                .comment("URL template for each item icon in the death report image. '{path}' = the item id",
+                         "(e.g. 'diamond_sword'), '{namespace}' = its mod id. Discord-independent: these are",
+                         "fetched server-side and composited. The default serves rendered VANILLA item icons",
+                         "only — point it at your own render host for modded items.")
+                .define("deathReportIconUrlTemplate", DEFAULT_DEATH_REPORT_ICON_URL_TEMPLATE);
         b.pop();
         SPEC = b.build();
     }
@@ -223,5 +253,21 @@ public final class DiscordPresenceConfig {
 
     public static String getAdvancementIconUrlTemplate() {
         return isLoaded() ? ADVANCEMENT_ICON_URL_TEMPLATE.get() : DEFAULT_ADVANCEMENT_ICON_URL_TEMPLATE;
+    }
+
+    public static boolean isAutoDeathReport() {
+        return isLoaded() ? AUTO_DEATH_REPORT.get() : DEFAULT_AUTO_DEATH_REPORT;
+    }
+
+    public static int getDeathReportEmbedColor() {
+        return isLoaded() ? DEATH_REPORT_EMBED_COLOR.get() : DEFAULT_DEATH_REPORT_EMBED_COLOR;
+    }
+
+    public static boolean isShowDeathReportImage() {
+        return isLoaded() ? SHOW_DEATH_REPORT_IMAGE.get() : DEFAULT_SHOW_DEATH_REPORT_IMAGE;
+    }
+
+    public static String getDeathReportIconUrlTemplate() {
+        return isLoaded() ? DEATH_REPORT_ICON_URL_TEMPLATE.get() : DEFAULT_DEATH_REPORT_ICON_URL_TEMPLATE;
     }
 }

@@ -24,6 +24,10 @@ public class DiscordPresence {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     public DiscordPresence(IEventBus modBus, ModContainer modContainer) {
+        // The death-report image is composed with java.awt/ImageIO; force headless so it
+        // works on a dedicated server with no display (must be set before any AWT use).
+        System.setProperty("java.awt.headless", "true");
+
         // SERVER config — server-side only, never sent to clients. Holds the
         // webhook URL + bot token secrets; a blank webhook URL disables the mod.
         modContainer.registerConfig(
