@@ -80,3 +80,40 @@ jobs:
           files: build/libs/discordpresence-neoforge-${{ env.MOD_VERSION }}.jar
           fail_on_unmatched_files: true
           prerelease: ${{ steps.rel.outputs.prerelease == 'true' }}
+
+      # Modrinth + CurseForge are opt-in: they publish only when the repo has
+      # both the token secret and the project-id variable. Until then they warn
+      # and skip, so the GitHub release (which Dungeon Train's jarJar bundle
+      # fetches) always succeeds on its own.
+      - name: Check mod-platform publish prerequisites
+        id: publish_check
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+          MODRINTH_PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
+          CURSEFORGE_PROJECT_ID: ${{ vars.CURSEFORGE_PROJECT_ID }}
+        run: |
+          MR=false; CF=false
+          if [ -n "$MODRINTH_TOKEN" ] && [ -n "$MODRINTH_PROJECT_ID" ]; then MR=true; else echo "::warning::Modrinth secret/variable missing — skipping Modrinth publish."; fi
+          if [ -n "$CURSEFORGE_TOKEN" ] && [ -n "$CURSEFORGE_PROJECT_ID" ]; then CF=true; else echo "::warning::CurseForge secret/variable missing — skipping CurseForge publish."; fi
+          echo "modrinth=$MR" >> "$GITHUB_OUTPUT"
+          echo "curseforge=$CF" >> "$GITHUB_OUTPUT"
+
+      - name: Publish NeoForge jar to Modrinth + CurseForge
+        if: steps.publish_check.outputs.modrinth == 'true' || steps.publish_check.outputs.curseforge == 'true'
+        uses: Kir-Antipov/mc-publish@v3.3
+        with:
+          modrinth-id: ${{ steps.publish_check.outputs.modrinth == 'true' && vars.MODRINTH_PROJECT_ID || '' }}
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          curseforge-id: ${{ steps.publish_check.outputs.curseforge == 'true' && vars.CURSEFORGE_PROJECT_ID || '' }}
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+          files: build/libs/discordpresence-neoforge-${{ env.MOD_VERSION }}.jar
+          name: Discord Presence ${{ env.RELEASE_TAG }}
+          version: ${{ env.RELEASE_TAG }}
+          version-type: ${{ steps.rel.outputs.prerelease == 'true' && 'beta' || 'release' }}
+          loaders: neoforge
+          game-versions: 1.21.1
+          java: 21
+          retry-attempts: 2
+          retry-delay: 10000
+          fail-mode: warn
