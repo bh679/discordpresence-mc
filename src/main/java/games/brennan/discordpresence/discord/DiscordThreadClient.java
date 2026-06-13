@@ -76,6 +76,43 @@ final class DiscordThreadClient {
     }
 
     /**
+     * Resolve a thread's top-level <b>anchor</b> message ref — the message the thread
+     * was started from. A message-thread's id equals its source message id, and that
+     * source message lives in the thread's parent channel, so the anchor ref is
+     * {@code (parent_id, threadId)}. Used to react on the top-level thread message for
+     * threads persisted before the parent channel was stored. {@code GET /channels/{threadId}}.
+     *
+     * @return a future of {@code DiscordMessageRef(parent_id, threadId)}, completing
+     *         with {@code null} when disabled, not a message-thread, or on any failure.
+     */
+    static CompletableFuture<DiscordMessageRef> fetchAnchorRef(String threadId) {
+        if (threadId == null || threadId.isBlank()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        String token = DiscordPresenceConfig.getBotToken();
+        if (token.isBlank()) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        URI uri = URI.create(API + "/channels/" + threadId);
+
+        HttpRequest req = HttpRequest.newBuilder(uri)
+                .header("Authorization", "Bot " + token)
+                .header("User-Agent", "DiscordPresence-Mod")
+                .timeout(DiscordHttp.TIMEOUT)
+                .GET()
+                .build();
+
+        return DiscordHttp.CLIENT
+                .sendAsync(req, HttpResponse.BodyHandlers.ofString())
+                .thenApply(resp -> parseAnchorRef(resp, threadId))
+                .exceptionally(t -> {
+                    LOGGER.warn("Discord fetch-thread-parent failed: {}", t.toString());
+                    return null;
+                });
+    }
+
+    /**
      * Post an advancement message into the channel/thread as the bot: an optional
      * {@code content} attribution line plus a coloured embed (title + description,
      * with an optional {@code iconUrl} thumbnail at the top-right), the embed colour
@@ -172,6 +209,23 @@ final class DiscordThreadClient {
             return new DiscordMessageRef(channelId, id);
         } catch (Exception e) {
             LOGGER.warn("Failed to parse Discord thread-message response", e);
+            return null;
+        }
+    }
+
+    private static DiscordMessageRef parseAnchorRef(HttpResponse<String> resp, String threadId) {
+        int code = resp.statusCode();
+        if (code != 200) {
+            handleError(code, resp);
+            return null;
+        }
+        try {
+            JsonObject json = JsonParser.parseString(resp.body()).getAsJsonObject();
+            String parentId = json.has("parent_id") && !json.get("parent_id").isJsonNull()
+                    ? json.get("parent_id").getAsString() : null;
+            return parentId == null ? null : new DiscordMessageRef(parentId, threadId);
+        } catch (Exception e) {
+            LOGGER.warn("Failed to parse Discord channel response", e);
             return null;
         }
     }

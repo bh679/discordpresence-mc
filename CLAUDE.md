@@ -72,7 +72,7 @@ Read `.claude/gates/gate-2-test.md` for the full procedure. After implementation
 1. Build the mod: `./gradlew build` — must pass cleanly (no errors, warnings noted)
 2. Run unit tests: `./gradlew test` (pure logic — webhook payloads, config, message templating)
 3. Launch a dev server/client and exercise the Discord path: `./gradlew runServer` (or `runClient`)
-   - **Live Discord verification needs secrets.** Populate the gitignored SERVER config (`*-server.toml` — e.g. `run/serverconfig/discordpresence-server.toml` in dev) with a real webhook URL / bot token, then join → leave → die and confirm the join message, online reaction (cleared on logout), and death reaction appear. Never commit that file.
+   - **Live Discord verification needs secrets.** Populate the gitignored SERVER config (`*-server.toml` — `run/config/discordpresence-server.toml` in dev; in a worktree copy it from main, see [Worktree / branch setup](#worktree--branch-setup--discord-secrets)) with a real webhook URL / bot token, then join → leave → die and confirm the join message, online reaction (cleared on logout), and death reaction appear. Never commit that file.
 4. Enter plan mode and present a **Gate 2 Testing Report**:
    - Build result: success/fail, jar size, output path (`build/libs/discordpresence-neoforge-<version>.jar`)
    - Unit test summary: total, passed, failed, skipped
