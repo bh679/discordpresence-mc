@@ -4,6 +4,7 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Shared single-thread daemon executor + {@link HttpClient} for every Discord
@@ -25,6 +26,18 @@ final class DiscordHttp {
             .connectTimeout(TIMEOUT)
             .executor(EXECUTOR)
             .build();
+
+    /**
+     * Separate single-thread daemon scheduler for periodic work (the account-link
+     * channel poller in {@code LinkService}). Kept off {@link #EXECUTOR} so the
+     * poll cadence never delays one-shot REST calls; the HTTP itself still runs
+     * through {@link #CLIENT}.
+     */
+    static final ScheduledExecutorService SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "DiscordPresence-Poll");
+        t.setDaemon(true);
+        return t;
+    });
 
     private DiscordHttp() {}
 }

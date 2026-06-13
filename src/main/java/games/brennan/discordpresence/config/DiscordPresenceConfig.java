@@ -27,6 +27,8 @@ public final class DiscordPresenceConfig {
     public static final String DEFAULT_THREAD_NAME_TEMPLATE = "{player}";
     public static final int DEFAULT_THREAD_AUTO_ARCHIVE_MINUTES = 10080; // 1 week
     public static final String DEFAULT_ADVANCEMENT_TEMPLATE = "{player} earned";
+    public static final int DEFAULT_LINK_CODE_TTL_MINUTES = 10;
+    public static final int DEFAULT_LINK_POLL_SECONDS = 8;
 
     public static final ModConfigSpec SPEC;
     public static final ModConfigSpec.ConfigValue<String> WEBHOOK_URL;
@@ -41,6 +43,10 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.ConfigValue<List<? extends String>> ADVANCEMENT_NAMESPACES;
     public static final ModConfigSpec.BooleanValue ONLY_DISPLAY_ADVANCEMENTS;
     public static final ModConfigSpec.ConfigValue<String> ADVANCEMENT_MESSAGE_TEMPLATE;
+    public static final ModConfigSpec.ConfigValue<String> LINK_CHANNEL_ID;
+    public static final ModConfigSpec.IntValue LINK_CODE_TTL_MINUTES;
+    public static final ModConfigSpec.IntValue LINK_POLL_SECONDS;
+    public static final ModConfigSpec.BooleanValue DELETE_CODE_MESSAGE;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -107,6 +113,26 @@ public final class DiscordPresenceConfig {
                          "colour: green for task/goal, purple for challenge), so this line is normally just the",
                          "attribution. '{player}' = player name, '{advancement}' = the advancement's display title.")
                 .define("advancementMessageTemplate", DEFAULT_ADVANCEMENT_TEMPLATE);
+        LINK_CHANNEL_ID = b
+                .comment("Discord channel ID the bot polls for account-link codes. A player runs",
+                         "'/discordpresence link' in-game, gets a one-time code, and posts it in THIS channel",
+                         "to verify their Minecraft <-> Discord account. Leave blank to disable linking.",
+                         "REQUIRES the bot token AND the MESSAGE CONTENT INTENT enabled in the Discord Developer",
+                         "Portal (Bot tab) — without it the bot reads empty message text and codes never match.",
+                         "Bot needs in this channel: View Channel, Read Message History (+ Manage Messages if",
+                         "deleteCodeMessage is true). Not a secret, but pairs with the bot token.")
+                .define("linkChannelId", "");
+        LINK_CODE_TTL_MINUTES = b
+                .comment("Minutes a generated link code stays valid before it expires.")
+                .defineInRange("linkCodeTtlMinutes", DEFAULT_LINK_CODE_TTL_MINUTES, 1, 120);
+        LINK_POLL_SECONDS = b
+                .comment("How often (seconds) the bot polls the link channel for codes while a link is pending.",
+                         "Polling only runs while at least one code is outstanding, then stops.")
+                .defineInRange("linkPollSeconds", DEFAULT_LINK_POLL_SECONDS, 2, 60);
+        DELETE_CODE_MESSAGE = b
+                .comment("Delete the player's code message from the link channel once matched (keeps it tidy).",
+                         "Requires the bot to have Manage Messages in that channel.")
+                .define("deleteCodeMessage", true);
         b.pop();
         SPEC = b.build();
     }
@@ -164,5 +190,21 @@ public final class DiscordPresenceConfig {
 
     public static String getAdvancementMessageTemplate() {
         return isLoaded() ? ADVANCEMENT_MESSAGE_TEMPLATE.get() : DEFAULT_ADVANCEMENT_TEMPLATE;
+    }
+
+    public static String getLinkChannelId() {
+        return isLoaded() ? LINK_CHANNEL_ID.get() : "";
+    }
+
+    public static int getLinkCodeTtlMinutes() {
+        return isLoaded() ? LINK_CODE_TTL_MINUTES.get() : DEFAULT_LINK_CODE_TTL_MINUTES;
+    }
+
+    public static int getLinkPollSeconds() {
+        return isLoaded() ? LINK_POLL_SECONDS.get() : DEFAULT_LINK_POLL_SECONDS;
+    }
+
+    public static boolean isDeleteCodeMessage() {
+        return isLoaded() ? DELETE_CODE_MESSAGE.get() : true;
     }
 }

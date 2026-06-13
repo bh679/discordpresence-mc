@@ -156,7 +156,9 @@ gh run watch $(gh run list --workflow=release.yml --limit 1 --json databaseId --
 
 - `discord/` — `DiscordHttp` (shared daemon executor + `HttpClient`), `DiscordWebhookClient` (post via webhook with `?wait=true`), `DiscordBotClient` (reactions via bot REST — **the future gateway / two-way read path lives here**), `DiscordService` (singleton facade + per-UUID message-future map; the seam two-way inbound routing extends), `DiscordMessageRef`.
 - `event/DiscordPresenceEvents` — `@EventBusSubscriber` wiring vanilla player login/logout/death + server-stopping. Logic-free; not Dist-gated (runs on dedicated servers).
-- `config/DiscordPresenceConfig` — SERVER config (secrets + message template + emojis).
+- `config/DiscordPresenceConfig` — SERVER config (secrets + message template + emojis + the account-link channel/tunables).
+- `discord/LinkService` (+ `LinkCodes`, `DiscordLinkStore`, `DiscordLinkClient`) — **account verification**: `/discordpresence link` mints a one-time code; the bot polls the link channel via REST for it, then persists the verified `UUID↔DiscordID` to `discordpresence-links.json`. **Requires the Message Content privileged intent** — REST returns empty message content without it. The first concrete use of the inbound seam the gateway path will build on. Poller is lazy (runs only while a code is pending) and off-thread on `DiscordHttp.SCHEDULER`.
+- `command/DiscordPresenceCommands` — `@EventBusSubscriber` registering `/discordpresence link|status|unlink` (alias `/dp`). Logic-free delegation to `LinkService`.
 
 Discord is **best-effort**: every failure is logged and swallowed; gameplay never blocks on HTTP.
 All Discord I/O runs off-thread on the daemon executor.

@@ -2,6 +2,7 @@ package games.brennan.discordpresence.event;
 
 import games.brennan.discordpresence.DiscordPresence;
 import games.brennan.discordpresence.discord.DiscordService;
+import games.brennan.discordpresence.discord.LinkService;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -24,6 +25,7 @@ public final class DiscordPresenceEvents {
     @SubscribeEvent
     public static void onServerStarted(ServerStartedEvent event) {
         DiscordService.get().loadThreads();
+        LinkService.get().onServerStarted(event.getServer());
     }
 
     @SubscribeEvent
@@ -57,5 +59,6 @@ public final class DiscordPresenceEvents {
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
         DiscordService.get().clearAll();
+        LinkService.get().clearAll();
     }
 }

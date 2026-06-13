@@ -23,6 +23,7 @@ run/
 *-server.toml
 *.local.toml
 
-# Runtime data — persistent player→thread map written at runtime. Not a secret,
-# but server-/run-local; never commit.
+# Runtime data — persistent player→thread map + verified account links written at
+# runtime. Not secrets, but server-/run-local; never commit.
 discordpresence-threads.json
+discordpresence-links.json
