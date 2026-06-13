@@ -13,6 +13,10 @@ joins, then keeps it live with reactions:
   (filterable by namespace).
 - 💬 **Two-way chat** — in-game chat relays to Discord under each player's name (into their
   thread), and Discord **replies or thread messages** relay back into the game.
+- 🕯️ **Whispers into the darkness** — when a player chats with no active Discord conversation,
+  the game shows a random grey flavour line (e.g. *"Steve whispers into the void, is anyone
+  there?"*) — purely in-game, nudging Discord to reply. It turns off once a Discord reply lands
+  and re-arms after a quiet spell.
 
 It hooks only vanilla player events, so it works on any NeoForge server — and in singleplayer.
 It's also bundled into [Dungeon Train](https://github.com/bh679/dungeon-train-mc).
@@ -79,6 +83,26 @@ chatter is ignored, and the bot's/webhook's own messages are never echoed back.
 > `discordpresence-server.toml` holds secrets and is **server-side only** (never sent to
 > clients). Don't commit it. A separate `discordpresence-client.toml` stores only your one-time
 > network-access choice (`networkConsent`) — no secrets.
+
+### Auto-responses ("whispers into the darkness")
+
+When a player chats while no Discord conversation is active, the game shows a grey, system-style
+flavour line ~0.3s after their own message — assembled at random from `{player} {verb} into the
+{place}, {phrase}` (~2,000 combinations from the word-lists). It posts **nothing** to Discord;
+it's purely in-game feedback that the message went out to a quiet channel. A relayed Discord
+reply turns it off for that player, and it re-arms after `rearmMinutes` of Discord silence
+(remembered across worlds in singleplayer). At most one fires per 30 seconds. These keys live
+under a separate `[autoResponse]` section of `discordpresence-server.toml`:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | Master toggle for the in-game auto-responses. |
+| `rearmMinutes` | `30` | Minutes of Discord silence before responses re-arm after a reply. |
+| `aloneCooldownSeconds` | `30` | Min seconds between responses when the player is alone (a 30s floor always applies). |
+| `aloneTemplate` | `{player} {verb} into the {place}, {phrase}` | How the alone whisper is assembled. |
+| `verbs` / `places` / `phrases` | word lists | Random pools for the template's `{verb}` / `{place}` / `{phrase}`. |
+| `groupCooldownSeconds` | `300` | Min seconds between responses when other players are online. |
+| `groupMessages` | `["{player} mutters to themselves..."]` | Flat message pool used when others are online. |
 
 ## Build
 
