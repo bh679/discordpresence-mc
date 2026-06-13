@@ -51,6 +51,11 @@ The development-workflow rule directs you to read gate playbooks at each gate tr
 - One feature per session
 - Commit and push after every meaningful unit of work
 - **Secrets** (webhook URL, bot token) live only in the runtime SERVER config — NEVER commit them. `*-server.toml` is gitignored.
+- **Worktree/branch setup — copy secrets first.** A fresh worktree has no `run/config/discordpresence-server.toml`, so live Discord testing runs with **blank secrets (Discord disabled)**. Before `runClient`/`runServer`, copy it from the main checkout (worktrees sit at `.claude/worktrees/<name>`, so the main tree is three levels up):
+  ```bash
+  mkdir -p run/config && cp ../../../run/config/discordpresence-server.toml run/config/discordpresence-server.toml
+  ```
+  It stays gitignored (`run/` + `*-server.toml`) — never commit it.
 
 ---
 
@@ -72,7 +77,7 @@ Read `.claude/gates/gate-2-test.md` for the full procedure. After implementation
 1. Build the mod: `./gradlew build` — must pass cleanly (no errors, warnings noted)
 2. Run unit tests: `./gradlew test` (pure logic — webhook payloads, config, message templating)
 3. Launch a dev server/client and exercise the Discord path: `./gradlew runServer` (or `runClient`)
-   - **Live Discord verification needs secrets.** Populate the gitignored SERVER config (`*-server.toml` — e.g. `run/serverconfig/discordpresence-server.toml` in dev) with a real webhook URL / bot token, then join → leave → die and confirm the join message, online reaction (cleared on logout), and death reaction appear. Never commit that file.
+   - **Live Discord verification needs secrets.** Populate the gitignored SERVER config (`*-server.toml` — `run/config/discordpresence-server.toml` in dev) with a real webhook URL / bot token, then join → leave → die and confirm the join message, online reaction (cleared on logout), and death reaction appear. Never commit that file. **In a worktree, copy it from the main checkout first** (see Key Rules Summary) — a fresh worktree's config is blank, so Discord stays off.
 4. Enter plan mode and present a **Gate 2 Testing Report**:
    - Build result: success/fail, jar size, output path (`build/libs/discordpresence-neoforge-<version>.jar`)
    - Unit test summary: total, passed, failed, skipped
@@ -109,7 +114,7 @@ Read `.claude/gates/gate-3-merge.md` for the full procedure. Summary:
 ### Manual Discord Testing
 
 For Gate 2 verification:
-1. Put a webhook URL / bot token in the gitignored SERVER config (`*-server.toml`, e.g. `run/serverconfig/discordpresence-server.toml`)
+1. Put a webhook URL / bot token in the gitignored SERVER config (`*-server.toml` — `run/config/discordpresence-server.toml` in dev). In a worktree, copy it from the main checkout first: `mkdir -p run/config && cp ../../../run/config/discordpresence-server.toml run/config/discordpresence-server.toml` — a fresh worktree's config is blank.
 2. `./gradlew runServer` (or `runClient`) — wait for it to start
 3. Join → confirm the join message + online reaction post to Discord; quit → confirm the online reaction clears; die → confirm the death reaction
 4. Discord is **best-effort**: failures are logged and swallowed, so check the server log for `discordpresence` warnings if nothing appears
