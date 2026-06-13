@@ -21,8 +21,9 @@ import java.util.concurrent.CompletableFuture;
  * so the bot can later react to it.
  *
  * <p>The same call posts either a top-level channel message (the first-join
- * anchor) or a message inside an existing thread (via {@code &thread_id=}),
- * keeping the per-player webhook username/avatar in both cases.</p>
+ * anchor or a relayed chat line) or a message inside an existing thread (via
+ * {@code &thread_id=}), keeping the per-player webhook username/avatar in both
+ * cases.</p>
  *
  * <p>Webhooks can only post/edit/delete their own messages — they cannot add
  * reactions or create threads (that's {@link DiscordBotClient} /

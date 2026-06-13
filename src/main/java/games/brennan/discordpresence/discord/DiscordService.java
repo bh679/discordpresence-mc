@@ -58,6 +58,7 @@ public final class DiscordService {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int MAX_RELAY_CHARS = 256;
     private static final String THREAD_STORE_FILE = "discordpresence-threads.json";
+    private static final String AUTO_RESPONSE_STORE_FILE = "discordpresence-autoresponse.json";
 
     private static final DiscordService INSTANCE = new DiscordService();
 
@@ -73,6 +74,9 @@ public final class DiscordService {
 
     /** messageId / threadId → owning player, for everything we post on a player's behalf. */
     private final PlayerMessageIndex reverse = new PlayerMessageIndex();
+
+    /** In-game "whispers into the darkness" auto-responses — game-side only, no Discord I/O. */
+    private final AutoResponder autoResponder = new AutoResponder();
 
     /** One-shot WARN so a missing privileged intent doesn't spam the log. */
     private final AtomicBoolean warnedBlankContent = new AtomicBoolean(false);
@@ -113,6 +117,7 @@ public final class DiscordService {
     /** Opens the gateway (if inbound relay is enabled and consented) once the server is up. */
     public void onServerStarted(MinecraftServer startedServer) {
         this.server = startedServer;
+        autoResponder.loadState(FMLPaths.CONFIGDIR.get().resolve(AUTO_RESPONSE_STORE_FILE));
         LOGGER.info("Discord Presence onServerStarted: dedicated={}, webhookSet={}, consent={}, relayDiscordToGame={}, botTokenSet={}",
                 startedServer.isDedicatedServer(), enabled(),
                 DiscordPresenceClientConfig.getConsent(), DiscordPresenceConfig.isRelayDiscordToGame(),
@@ -234,6 +239,8 @@ public final class DiscordService {
                 reverse.put(ref.messageId(), uuid);
             }
         });
+        // In-game flavour feedback when the player is "whispering into the darkness".
+        autoResponder.onPlayerChat(player);
     }
 
     /**
@@ -250,6 +257,14 @@ public final class DiscordService {
         }
         if (!isRelayable(msg, reverse)) {
             return; // our own posts/bots, or not anchored to a tracked player message
+        }
+        // A Discord reply reached the server — disarm that player's auto-responses.
+        UUID owner = reverse.get(msg.referencedMessageId());
+        if (owner == null) {
+            owner = reverse.get(msg.channelId());
+        }
+        if (owner != null) {
+            autoResponder.onDiscordActivity(owner);
         }
         String content = sanitize(msg.content());
         if (content.isBlank()) {
@@ -375,6 +390,7 @@ public final class DiscordService {
         sessionMessages.clear();
         threadFutures.clear();
         reverse.clear();
+        autoResponder.clear();
         server = null;
     }
 
