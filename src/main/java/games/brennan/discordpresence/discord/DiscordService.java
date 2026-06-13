@@ -6,6 +6,7 @@ import games.brennan.discordpresence.config.DiscordPresenceConfig;
 import net.minecraft.ChatFormatting;
 import net.minecraft.advancements.AdvancementHolder;
 import net.minecraft.advancements.DisplayInfo;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -57,6 +58,7 @@ public final class DiscordService {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int MAX_RELAY_CHARS = 256;
     private static final String THREAD_STORE_FILE = "discordpresence-threads.json";
+    private static final String AUTO_RESPONSE_STORE_FILE = "discordpresence-autoresponse.json";
 
     private static final DiscordService INSTANCE = new DiscordService();
 
@@ -72,6 +74,9 @@ public final class DiscordService {
 
     /** messageId / threadId → owning player, for everything we post on a player's behalf. */
     private final PlayerMessageIndex reverse = new PlayerMessageIndex();
+
+    /** In-game "whispers into the darkness" auto-responses — game-side only, no Discord I/O. */
+    private final AutoResponder autoResponder = new AutoResponder();
 
     /** One-shot WARN so a missing privileged intent doesn't spam the log. */
     private final AtomicBoolean warnedBlankContent = new AtomicBoolean(false);
@@ -112,6 +117,7 @@ public final class DiscordService {
     /** Opens the gateway (if inbound relay is enabled and consented) once the server is up. */
     public void onServerStarted(MinecraftServer startedServer) {
         this.server = startedServer;
+        autoResponder.loadState(FMLPaths.CONFIGDIR.get().resolve(AUTO_RESPONSE_STORE_FILE));
         LOGGER.info("Discord Presence onServerStarted: dedicated={}, webhookSet={}, consent={}, relayDiscordToGame={}, botTokenSet={}",
                 startedServer.isDedicatedServer(), enabled(),
                 DiscordPresenceClientConfig.getConsent(), DiscordPresenceConfig.isRelayDiscordToGame(),
@@ -247,6 +253,8 @@ public final class DiscordService {
                 reverse.put(ref.messageId(), uuid);
             }
         });
+        // In-game flavour feedback when the player is "whispering into the darkness".
+        autoResponder.onPlayerChat(player);
     }
 
     /**
@@ -263,6 +271,14 @@ public final class DiscordService {
         }
         if (!isRelayable(msg, reverse)) {
             return; // our own posts/bots, or not anchored to a tracked player message
+        }
+        // A Discord reply reached the server — disarm that player's auto-responses.
+        UUID owner = reverse.get(msg.referencedMessageId());
+        if (owner == null) {
+            owner = reverse.get(msg.channelId());
+        }
+        if (owner != null) {
+            autoResponder.onDiscordActivity(owner);
         }
         String content = sanitize(msg.content());
         if (content.isBlank()) {
@@ -339,20 +355,43 @@ public final class DiscordService {
             threadFuture = CompletableFuture.completedFuture(existing);
         }
 
-        // Title + full description + frame colour come from the advancement's display
-        // (rendered as a coloured embed); the content line is the configurable attribution.
+        // Title + description + frame colour + icon come from the advancement's display
+        // (rendered as a coloured embed with the item icon as a thumbnail); the content
+        // line is the configurable attribution.
         String title = display.map(d -> d.getTitle().getString()).orElse(holder.id().toString());
         String description = display.map(d -> d.getDescription().getString()).orElse("");
         Integer color = display.map(DiscordService::frameColor).orElse(null);
+        String iconUrl = iconUrlFor(display);
         String content = formatAdvancement(
                 DiscordPresenceConfig.getAdvancementMessageTemplate(),
                 player.getGameProfile().getName(), title);
 
         threadFuture.thenAccept(threadId -> {
             if (threadId != null) {
-                DiscordThreadClient.postEmbed(threadId, content, title, description, color);
+                DiscordThreadClient.postEmbed(threadId, content, title, description, color, iconUrl);
             }
         });
+    }
+
+    /** The advancement frame's chat colour as a Discord embed colour (0xRRGGBB), or null. */
+    private static Integer frameColor(DisplayInfo display) {
+        ChatFormatting chatColor = display.getType().getChatColor();
+        return chatColor != null ? chatColor.getColor() : null;
+    }
+
+    /**
+     * The thumbnail URL for the advancement's icon item, or null when the icon is
+     * disabled or there is no display. Resolves the icon {@link net.minecraft.world.item.ItemStack}
+     * to its registry id and substitutes it into the configured template.
+     */
+    private static String iconUrlFor(Optional<DisplayInfo> display) {
+        if (!DiscordPresenceConfig.isShowAdvancementIcon() || display.isEmpty()) {
+            return null;
+        }
+        var iconId = BuiltInRegistries.ITEM.getKey(display.get().getIcon().getItem());
+        return advancementIconUrl(
+                DiscordPresenceConfig.getAdvancementIconUrlTemplate(),
+                iconId.getNamespace(), iconId.getPath());
     }
 
     /** Drop per-session tracking + close the gateway on server stop (the durable store stays on disk). */
@@ -365,6 +404,7 @@ public final class DiscordService {
         sessionMessages.clear();
         threadFutures.clear();
         reverse.clear();
+        autoResponder.clear();
         server = null;
     }
 
@@ -433,9 +473,18 @@ public final class DiscordService {
         return template.replace("{player}", player).replace("{advancement}", advancement);
     }
 
-    /** The advancement frame's chat colour as a Discord embed colour (0xRRGGBB), or null. */
-    private static Integer frameColor(DisplayInfo display) {
-        ChatFormatting chatColor = display.getType().getChatColor();
-        return chatColor != null ? chatColor.getColor() : null;
+    /**
+     * Build the advancement icon thumbnail URL by substituting the icon item's
+     * registry id into {@code template} ({@code {namespace}} / {@code {path}}
+     * placeholders), or null when the template or path is blank. Registry paths are
+     * limited to {@code [a-z0-9_.-/]}, so no URL-encoding is needed.
+     */
+    static String advancementIconUrl(String template, String namespace, String path) {
+        if (template == null || template.isBlank() || path == null || path.isBlank()) {
+            return null;
+        }
+        return template
+                .replace("{namespace}", namespace == null ? "" : namespace)
+                .replace("{path}", path);
     }
 }

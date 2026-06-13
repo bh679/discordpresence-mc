@@ -6,6 +6,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Regression tests for the advancement filter + message templating. */
@@ -46,5 +47,32 @@ class DiscordAdvancementTest {
     void formatReplacesPlayer() {
         assertEquals("🎮 **Dev** started the game",
                 DiscordService.format("🎮 **{player}** started the game", "Dev"));
+    }
+
+    @Test
+    void buildsVanillaIconUrlFromPath() {
+        // The default vanilla CDN template uses only {path}.
+        assertEquals("https://static.minecraftitemids.com/64/stone.png",
+                DiscordService.advancementIconUrl(
+                        "https://static.minecraftitemids.com/64/{path}.png", "minecraft", "stone"));
+    }
+
+    @Test
+    void iconUrlSubstitutesNamespaceAndPath() {
+        // A modded override template uses both placeholders.
+        assertEquals("https://host/dungeontrain/relic.png",
+                DiscordService.advancementIconUrl(
+                        "https://host/{namespace}/{path}.png", "dungeontrain", "relic"));
+    }
+
+    @Test
+    void iconUrlNullWhenTemplateBlank() {
+        assertNull(DiscordService.advancementIconUrl("", "minecraft", "stone"));
+        assertNull(DiscordService.advancementIconUrl("   ", "minecraft", "stone"));
+    }
+
+    @Test
+    void iconUrlNullWhenPathBlank() {
+        assertNull(DiscordService.advancementIconUrl("https://host/{path}.png", "minecraft", ""));
     }
 }
