@@ -39,7 +39,7 @@ final class AutoResponder {
     private static final int MIN_COOLDOWN_SECONDS = 30;
 
     /** Delay before the whisper shows, so it lands AFTER the player's own chat line. */
-    private static final long WHISPER_DELAY_MILLIS = 1000L;
+    private static final long WHISPER_DELAY_MILLIS = 300L;
 
     private final AutoResponseStore store = new AutoResponseStore();
 
@@ -91,12 +91,6 @@ final class AutoResponder {
         }
 
         boolean alone = isAlone(server.getPlayerList().getPlayers().size());
-        List<? extends String> messages = alone
-                ? DiscordPresenceConfig.getAutoResponseAloneMessages()
-                : DiscordPresenceConfig.getAutoResponseGroupMessages();
-        if (messages.isEmpty()) {
-            return; // this mode disabled
-        }
         int cooldownSeconds = effectiveCooldownSeconds(alone
                 ? DiscordPresenceConfig.getAutoResponseAloneCooldownSeconds()
                 : DiscordPresenceConfig.getAutoResponseGroupCooldownSeconds());
@@ -105,9 +99,11 @@ final class AutoResponder {
         }
 
         String name = player.getGameProfile().getName();
-        String line = pickAndFormat(messages, name, ThreadLocalRandom.current().nextInt(messages.size()));
+        // Alone: assemble "{player} {verb} into the {place}, {phrase}" from random picks.
+        // Group (others online): pick from the flat group message list.
+        String line = alone ? composeAloneWhisper(name) : pickGroupMessage(name);
         if (line == null || line.isBlank()) {
-            return;
+            return; // this mode's message pool is empty
         }
         lastWhisper.put(uuid, now);
         // Grey, like a system message. Delayed ~1s and hopped back onto the server thread so it
@@ -122,6 +118,30 @@ final class AutoResponder {
                 // server stopped during the delay, etc. — best-effort flavour, never throw.
             }
         }, WHISPER_DELAY_MILLIS, TimeUnit.MILLISECONDS);
+    }
+
+    /** Assemble the alone whisper from the configured template + a random verb/place/phrase. */
+    private static String composeAloneWhisper(String player) {
+        List<? extends String> verbs = DiscordPresenceConfig.getAutoResponseVerbs();
+        List<? extends String> places = DiscordPresenceConfig.getAutoResponsePlaces();
+        List<? extends String> phrases = DiscordPresenceConfig.getAutoResponsePhrases();
+        if (verbs.isEmpty() || places.isEmpty() || phrases.isEmpty()) {
+            return null; // a slot pool is empty — nothing to say
+        }
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        String verb = verbs.get(rng.nextInt(verbs.size()));
+        String place = places.get(rng.nextInt(places.size()));
+        String phrase = phrases.get(rng.nextInt(phrases.size()));
+        return compose(DiscordPresenceConfig.getAutoResponseAloneTemplate(), player, verb, place, phrase);
+    }
+
+    /** Pick a random line from the group (others-online) message list. */
+    private static String pickGroupMessage(String player) {
+        List<? extends String> msgs = DiscordPresenceConfig.getAutoResponseGroupMessages();
+        if (msgs.isEmpty()) {
+            return null;
+        }
+        return pickAndFormat(msgs, player, ThreadLocalRandom.current().nextInt(msgs.size()));
     }
 
     // --- pure helpers (unit-tested) ---------------------------------------
@@ -159,5 +179,17 @@ final class AutoResponder {
         }
         String template = messages.get(Math.floorMod(roll, messages.size()));
         return template == null ? null : template.replace("{player}", player);
+    }
+
+    /** Fill {@code {player}/{verb}/{place}/{phrase}} in an alone-whisper template (nulls → empty). */
+    static String compose(String template, String player, String verb, String place, String phrase) {
+        if (template == null) {
+            return null;
+        }
+        return template
+                .replace("{player}", player == null ? "" : player)
+                .replace("{verb}", verb == null ? "" : verb)
+                .replace("{place}", place == null ? "" : place)
+                .replace("{phrase}", phrase == null ? "" : phrase);
     }
 }

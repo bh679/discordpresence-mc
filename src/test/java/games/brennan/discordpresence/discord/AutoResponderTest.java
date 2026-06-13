@@ -110,4 +110,18 @@ class AutoResponderTest {
         assertNull(AutoResponder.pickAndFormat(List.of(), "Steve", 0));
         assertNull(AutoResponder.pickAndFormat(null, "Steve", 0));
     }
+
+    // --- compose (alone whisper template) ---
+
+    @Test
+    void composeSubstitutesAllSlots() {
+        assertEquals("Steve whispers into the darkness, is anyone there?",
+                AutoResponder.compose("{player} {verb} into the {place}, {phrase}",
+                        "Steve", "whispers", "darkness", "is anyone there?"));
+    }
+
+    @Test
+    void composeNullTemplateReturnsNull() {
+        assertNull(AutoResponder.compose(null, "Steve", "a", "b", "c"));
+    }
 }

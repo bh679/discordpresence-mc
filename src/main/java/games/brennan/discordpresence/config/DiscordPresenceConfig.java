@@ -36,8 +36,21 @@ public final class DiscordPresenceConfig {
     public static final int DEFAULT_AUTO_RESPONSE_REARM_MINUTES = 30;
     public static final int DEFAULT_AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS = 30;
     public static final int DEFAULT_AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS = 300;
-    public static final List<String> DEFAULT_AUTO_RESPONSE_ALONE_MESSAGES =
-            List.of("{player} whispers into the darkness, perhaps someone will respond...");
+    public static final String DEFAULT_AUTO_RESPONSE_ALONE_TEMPLATE = "{player} {verb} into the {place}, {phrase}";
+    public static final List<String> DEFAULT_AUTO_RESPONSE_VERBS = List.of(
+            "whispers", "yells", "screams", "mutters", "mumbles", "shouts", "murmurs",
+            "cries out", "calls out", "hollers", "bellows", "echoes", "pleads");
+    public static final List<String> DEFAULT_AUTO_RESPONSE_PLACES = List.of(
+            "darkness", "void", "open world", "minecraft world", "computer", "chat",
+            "abyss", "silence", "wilderness", "ether", "emptiness", "unknown",
+            "shadows", "nothingness", "expanse", "night");
+    public static final List<String> DEFAULT_AUTO_RESPONSE_PHRASES = List.of(
+            "perhaps someone will respond...", "is anyone there?", "does anyone hear them?",
+            "are they really alone?", "what if they get a response?", "who could they be talking to?",
+            "perhaps they will be heard...", "perhaps they are not alone...", "will anyone answer?",
+            "the silence lingers...", "hoping for a reply...", "but no one stirs...",
+            "maybe the world is listening?", "who's out there?", "a voice in the dark...",
+            "waiting for an echo...", "is the void listening?", "perhaps a friend lurks nearby...");
     public static final List<String> DEFAULT_AUTO_RESPONSE_GROUP_MESSAGES =
             List.of("{player} mutters to themselves...");
 
@@ -60,7 +73,10 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.BooleanValue AUTO_RESPONSE_ENABLED;
     public static final ModConfigSpec.IntValue AUTO_RESPONSE_REARM_MINUTES;
     public static final ModConfigSpec.IntValue AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS;
-    public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_RESPONSE_ALONE_MESSAGES;
+    public static final ModConfigSpec.ConfigValue<String> AUTO_RESPONSE_ALONE_TEMPLATE;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_RESPONSE_VERBS;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_RESPONSE_PLACES;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_RESPONSE_PHRASES;
     public static final ModConfigSpec.IntValue AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS;
     public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_RESPONSE_GROUP_MESSAGES;
 
@@ -162,10 +178,25 @@ public final class DiscordPresenceConfig {
                 .comment("Minimum seconds between auto-responses while the player is ALONE (no other players",
                          "online). A 30-second floor always applies — values below 30 are treated as 30.")
                 .defineInRange("aloneCooldownSeconds", DEFAULT_AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS, 0, 86_400);
-        AUTO_RESPONSE_ALONE_MESSAGES = b
-                .comment("Flavour lines used when the player is ALONE; one is chosen at random.",
-                         "'{player}' is replaced with the player's name. Empty list = no alone auto-response.")
-                .defineListAllowEmpty("aloneMessages", () -> DEFAULT_AUTO_RESPONSE_ALONE_MESSAGES, () -> "",
+        AUTO_RESPONSE_ALONE_TEMPLATE = b
+                .comment("Template for the ALONE auto-response, assembled from random picks of the lists below.",
+                         "Placeholders: '{player}' = name, '{verb}', '{place}', '{phrase}'. Default reads e.g.",
+                         "\"Steve whispers into the darkness, is anyone there?\"")
+                .define("aloneTemplate", DEFAULT_AUTO_RESPONSE_ALONE_TEMPLATE);
+        AUTO_RESPONSE_VERBS = b
+                .comment("'{verb}' options for the alone template (e.g. whispers, yells). One picked at random.",
+                         "Empty = no alone auto-response.")
+                .defineListAllowEmpty("verbs", () -> DEFAULT_AUTO_RESPONSE_VERBS, () -> "whispers",
+                        o -> o instanceof String);
+        AUTO_RESPONSE_PLACES = b
+                .comment("'{place}' options for the alone template (e.g. darkness, void). One picked at random.",
+                         "Empty = no alone auto-response.")
+                .defineListAllowEmpty("places", () -> DEFAULT_AUTO_RESPONSE_PLACES, () -> "darkness",
+                        o -> o instanceof String);
+        AUTO_RESPONSE_PHRASES = b
+                .comment("'{phrase}' options for the alone template (the trailing line). One picked at random.",
+                         "Empty = no alone auto-response.")
+                .defineListAllowEmpty("phrases", () -> DEFAULT_AUTO_RESPONSE_PHRASES, () -> "is anyone there?",
                         o -> o instanceof String);
         AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS = b
                 .comment("Minimum seconds between auto-responses while OTHER players are online.",
@@ -260,8 +291,20 @@ public final class DiscordPresenceConfig {
         return isLoaded() ? AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS.get() : DEFAULT_AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS;
     }
 
-    public static List<? extends String> getAutoResponseAloneMessages() {
-        return isLoaded() ? AUTO_RESPONSE_ALONE_MESSAGES.get() : DEFAULT_AUTO_RESPONSE_ALONE_MESSAGES;
+    public static String getAutoResponseAloneTemplate() {
+        return isLoaded() ? AUTO_RESPONSE_ALONE_TEMPLATE.get() : DEFAULT_AUTO_RESPONSE_ALONE_TEMPLATE;
+    }
+
+    public static List<? extends String> getAutoResponseVerbs() {
+        return isLoaded() ? AUTO_RESPONSE_VERBS.get() : DEFAULT_AUTO_RESPONSE_VERBS;
+    }
+
+    public static List<? extends String> getAutoResponsePlaces() {
+        return isLoaded() ? AUTO_RESPONSE_PLACES.get() : DEFAULT_AUTO_RESPONSE_PLACES;
+    }
+
+    public static List<? extends String> getAutoResponsePhrases() {
+        return isLoaded() ? AUTO_RESPONSE_PHRASES.get() : DEFAULT_AUTO_RESPONSE_PHRASES;
     }
 
     public static int getAutoResponseGroupCooldownSeconds() {
