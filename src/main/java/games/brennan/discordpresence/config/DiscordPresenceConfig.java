@@ -43,14 +43,12 @@ public final class DiscordPresenceConfig {
     public static final List<String> DEFAULT_AUTO_RESPONSE_PLACES = List.of(
             "darkness", "void", "open world", "minecraft world", "computer", "chat",
             "abyss", "silence", "wilderness", "ether", "emptiness", "unknown",
-            "shadows", "nothingness", "expanse", "night");
+            "shadows", "nothingness", "expanse");
     public static final List<String> DEFAULT_AUTO_RESPONSE_PHRASES = List.of(
-            "perhaps someone will respond...", "is anyone there?", "does anyone hear them?",
-            "are they really alone?", "what if they get a response?", "who could they be talking to?",
-            "perhaps they will be heard...", "perhaps they are not alone...", "will anyone answer?",
-            "the silence lingers...", "hoping for a reply...", "but no one stirs...",
-            "maybe the world is listening?", "who's out there?", "a voice in the dark...",
-            "waiting for an echo...", "is the void listening?", "perhaps a friend lurks nearby...");
+            "will anyone answer?", "the silence lingers...", "hoping for a reply...",
+            "but no one stirs...", "maybe the world is listening?", "who's out there?",
+            "a voice in the dark...", "waiting for an echo...", "is the void listening?",
+            "perhaps a friend lurks nearby...");
     public static final List<String> DEFAULT_AUTO_RESPONSE_GROUP_MESSAGES =
             List.of("{player} mutters to themselves...");
 
