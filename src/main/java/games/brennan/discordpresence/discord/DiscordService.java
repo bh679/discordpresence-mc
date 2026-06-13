@@ -2,13 +2,16 @@ package games.brennan.discordpresence.discord;
 
 import com.mojang.logging.LogUtils;
 import games.brennan.discordpresence.config.DiscordPresenceConfig;
+import net.minecraft.ChatFormatting;
 import net.minecraft.advancements.AdvancementHolder;
+import net.minecraft.advancements.DisplayInfo;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.fml.loading.FMLPaths;
 import org.slf4j.Logger;
 
 import java.nio.file.Path;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -156,10 +159,10 @@ public final class DiscordService {
         }
 
         String namespace = holder.id().getNamespace();
-        boolean hasDisplay = holder.value().display().isPresent();
+        Optional<DisplayInfo> display = holder.value().display();
         Set<String> allowed = new HashSet<>(DiscordPresenceConfig.getAdvancementNamespaces());
         boolean onlyDisplay = DiscordPresenceConfig.isOnlyDisplayAdvancements();
-        if (!shouldPostAdvancement(namespace, hasDisplay, allowed, onlyDisplay)) {
+        if (!shouldPostAdvancement(namespace, display.isPresent(), allowed, onlyDisplay)) {
             return;
         }
 
@@ -173,18 +176,26 @@ public final class DiscordService {
             threadFuture = CompletableFuture.completedFuture(existing);
         }
 
-        String title = holder.value().display()
-                .map(d -> d.getTitle().getString())
-                .orElse(holder.id().toString());
+        // Title + full description + frame colour come from the advancement's display
+        // (rendered as a coloured embed); the content line is the configurable attribution.
+        String title = display.map(d -> d.getTitle().getString()).orElse(holder.id().toString());
+        String description = display.map(d -> d.getDescription().getString()).orElse("");
+        Integer color = display.map(DiscordService::frameColor).orElse(null);
         String content = formatAdvancement(
                 DiscordPresenceConfig.getAdvancementMessageTemplate(),
                 player.getGameProfile().getName(), title);
 
         threadFuture.thenAccept(threadId -> {
             if (threadId != null) {
-                DiscordThreadClient.postMessage(threadId, content);
+                DiscordThreadClient.postEmbed(threadId, content, title, description, color);
             }
         });
+    }
+
+    /** The advancement frame's chat colour as a Discord embed colour (0xRRGGBB), or null. */
+    private static Integer frameColor(DisplayInfo display) {
+        ChatFormatting chatColor = display.getType().getChatColor();
+        return chatColor != null ? chatColor.getColor() : null;
     }
 
     /** Drop per-session tracking on server stop (the durable store stays on disk). */

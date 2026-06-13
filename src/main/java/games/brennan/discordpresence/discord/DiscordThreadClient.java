@@ -76,12 +76,15 @@ final class DiscordThreadClient {
     }
 
     /**
-     * Post {@code content} into the channel/thread as the bot.
+     * Post an advancement message into the channel/thread as the bot: an optional
+     * {@code content} attribution line plus a coloured embed (title + description),
+     * the embed colour matching the in-game advancement frame.
      *
      * @return a future of the posted message ref, or {@code null} on failure.
      */
-    static CompletableFuture<DiscordMessageRef> postMessage(String channelId, String content) {
-        if (channelId == null || content == null || content.isBlank()) {
+    static CompletableFuture<DiscordMessageRef> postEmbed(String channelId, String content,
+                                                          String title, String description, Integer color) {
+        if (channelId == null) {
             return CompletableFuture.completedFuture(null);
         }
         String token = DiscordPresenceConfig.getBotToken();
@@ -89,8 +92,24 @@ final class DiscordThreadClient {
             return CompletableFuture.completedFuture(null);
         }
 
+        JsonObject embed = new JsonObject();
+        if (title != null && !title.isBlank()) {
+            embed.addProperty("title", title);
+        }
+        if (description != null && !description.isBlank()) {
+            embed.addProperty("description", description);
+        }
+        if (color != null) {
+            embed.addProperty("color", color); // 0xRRGGBB
+        }
+        JsonArray embeds = new JsonArray();
+        embeds.add(embed);
+
         JsonObject body = new JsonObject();
-        body.addProperty("content", content);
+        if (content != null && !content.isBlank()) {
+            body.addProperty("content", content);
+        }
+        body.add("embeds", embeds);
         // Never ping anyone from a player-controlled name/template.
         JsonObject allowedMentions = new JsonObject();
         allowedMentions.add("parse", new JsonArray());

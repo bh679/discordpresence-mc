@@ -2,6 +2,7 @@ package games.brennan.discordpresence.config;
 
 import net.neoforged.neoforge.common.ModConfigSpec;
 
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -25,7 +26,7 @@ public final class DiscordPresenceConfig {
     public static final String DEFAULT_DEATH_EMOJI = "💀";  // 💀
     public static final String DEFAULT_THREAD_NAME_TEMPLATE = "{player}";
     public static final int DEFAULT_THREAD_AUTO_ARCHIVE_MINUTES = 10080; // 1 week
-    public static final String DEFAULT_ADVANCEMENT_TEMPLATE = "{player} earned **{advancement}**";
+    public static final String DEFAULT_ADVANCEMENT_TEMPLATE = "{player} earned";
 
     public static final ModConfigSpec SPEC;
     public static final ModConfigSpec.ConfigValue<String> WEBHOOK_URL;
@@ -85,8 +86,12 @@ public final class DiscordPresenceConfig {
         THREAD_AUTO_ARCHIVE_MINUTES = b
                 .comment("Minutes of inactivity after which Discord auto-archives the thread.",
                          "Only Discord's allowed values are accepted: 60 (1h), 1440 (1d), 4320 (3d), 10080 (1w).")
+                // NOTE: acceptable values MUST be a null-tolerant list. ModConfigSpec
+                // tests the (absent → null) current value against this during config
+                // correction; an immutable List.of(...) throws NPE on contains(null),
+                // crashing world load. Arrays.asList(...).contains(null) returns false.
                 .defineInList("threadAutoArchiveMinutes", DEFAULT_THREAD_AUTO_ARCHIVE_MINUTES,
-                        List.of(60, 1440, 4320, 10080));
+                        Arrays.asList(60, 1440, 4320, 10080));
         ADVANCEMENT_NAMESPACES = b
                 .comment("Advancement namespaces to announce in the thread. Empty = announce ALL namespaces.",
                          "E.g. [\"dungeontrain\"] to only announce a specific mod's advancements.")
@@ -97,8 +102,10 @@ public final class DiscordPresenceConfig {
                          "noisy hidden 'recipe' advancements. Leave true unless you really want every one.")
                 .define("onlyDisplayAdvancements", true);
         ADVANCEMENT_MESSAGE_TEMPLATE = b
-                .comment("Message posted in the thread when a player earns an advancement.",
-                         "'{player}' = player name, '{advancement}' = the advancement's display title.")
+                .comment("Attribution line posted above the advancement embed in the thread. The advancement's",
+                         "title + full description render inside a coloured embed (matching the in-game frame",
+                         "colour: green for task/goal, purple for challenge), so this line is normally just the",
+                         "attribution. '{player}' = player name, '{advancement}' = the advancement's display title.")
                 .define("advancementMessageTemplate", DEFAULT_ADVANCEMENT_TEMPLATE);
         b.pop();
         SPEC = b.build();
