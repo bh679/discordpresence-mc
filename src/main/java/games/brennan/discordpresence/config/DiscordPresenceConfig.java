@@ -31,6 +31,10 @@ public final class DiscordPresenceConfig {
     public static final String DEFAULT_ADVANCEMENT_ICON_URL_TEMPLATE =
             "https://static.minecraftitemids.com/64/{path}.png";
 
+    public static final boolean DEFAULT_RELAY_DISCORD_TO_GAME = true;
+    public static final boolean DEFAULT_RELAY_GAME_TO_DISCORD = true;
+    public static final String DEFAULT_DISCORD_TO_GAME_FORMAT = "<{user}> {msg}";
+
     public static final ModConfigSpec SPEC;
     public static final ModConfigSpec.ConfigValue<String> WEBHOOK_URL;
     public static final ModConfigSpec.ConfigValue<String> BOT_TOKEN;
@@ -38,6 +42,9 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.ConfigValue<String> FIRST_JOIN_MESSAGE_TEMPLATE;
     public static final ModConfigSpec.ConfigValue<String> ONLINE_EMOJI;
     public static final ModConfigSpec.ConfigValue<String> DEATH_EMOJI;
+    public static final ModConfigSpec.BooleanValue RELAY_DISCORD_TO_GAME;
+    public static final ModConfigSpec.BooleanValue RELAY_GAME_TO_DISCORD;
+    public static final ModConfigSpec.ConfigValue<String> DISCORD_TO_GAME_FORMAT;
     public static final ModConfigSpec.BooleanValue CREATE_THREAD_ON_JOIN;
     public static final ModConfigSpec.ConfigValue<String> THREAD_NAME_TEMPLATE;
     public static final ModConfigSpec.ConfigValue<Integer> THREAD_AUTO_ARCHIVE_MINUTES;
@@ -78,6 +85,22 @@ public final class DiscordPresenceConfig {
                 .comment("Emoji reaction added to the join message when the player dies.",
                          "A standard unicode emoji (e.g. 💀). Leave blank to skip the death reaction.")
                 .define("deathEmoji", DEFAULT_DEATH_EMOJI);
+        RELAY_DISCORD_TO_GAME = b
+                .comment("Relay messages from Discord into in-game chat. Requires the bot token AND the",
+                         "Message Content privileged intent enabled in the Discord Developer Portal.",
+                         "Only messages that REPLY to — or are posted in a player's THREAD (or a thread started",
+                         "from a message this mod posted for them, e.g. a relayed chat line) are relayed.",
+                         "On a dedicated server this is on by default; in singleplayer it also needs the",
+                         "one-time in-game network confirmation.")
+                .define("relayDiscordToGame", DEFAULT_RELAY_DISCORD_TO_GAME);
+        RELAY_GAME_TO_DISCORD = b
+                .comment("Relay in-game chat to Discord through the webhook, posted under each player's name",
+                         "(into their thread when they have one).")
+                .define("relayGameToDiscord", DEFAULT_RELAY_GAME_TO_DISCORD);
+        DISCORD_TO_GAME_FORMAT = b
+                .comment("Format for a relayed Discord message shown in-game.",
+                         "'{user}' = the Discord author's name, '{msg}' = their message text.")
+                .define("discordToGameFormat", DEFAULT_DISCORD_TO_GAME_FORMAT);
         CREATE_THREAD_ON_JOIN = b
                 .comment("Create one persistent Discord thread per player (anchored to their first-join",
                          "message) and route later joins, deaths and advancements into it. Requires the bot",
@@ -156,6 +179,18 @@ public final class DiscordPresenceConfig {
 
     public static String getDeathEmoji() {
         return isLoaded() ? DEATH_EMOJI.get() : DEFAULT_DEATH_EMOJI;
+    }
+
+    public static boolean isRelayDiscordToGame() {
+        return isLoaded() ? RELAY_DISCORD_TO_GAME.get() : DEFAULT_RELAY_DISCORD_TO_GAME;
+    }
+
+    public static boolean isRelayGameToDiscord() {
+        return isLoaded() ? RELAY_GAME_TO_DISCORD.get() : DEFAULT_RELAY_GAME_TO_DISCORD;
+    }
+
+    public static String getDiscordToGameFormat() {
+        return isLoaded() ? DISCORD_TO_GAME_FORMAT.get() : DEFAULT_DISCORD_TO_GAME_FORMAT;
     }
 
     public static boolean isCreateThreadOnJoin() {
