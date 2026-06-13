@@ -28,7 +28,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class DiscordThreadClient {
 
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final String API = "https://discord.com/api/v10";
     private static final int MAX_THREAD_NAME = 100; // Discord's limit
 
     /** One-shot WARN de-dupe so a misconfigured token/perms doesn't spam the log. */
@@ -46,8 +45,7 @@ final class DiscordThreadClient {
         if (anchor == null) {
             return CompletableFuture.completedFuture(null);
         }
-        String token = DiscordPresenceConfig.getBotToken();
-        if (token.isBlank()) {
+        if (DiscordHttp.botUnavailable()) {
             return CompletableFuture.completedFuture(null);
         }
 
@@ -55,14 +53,11 @@ final class DiscordThreadClient {
         body.addProperty("name", threadName(name));
         body.addProperty("auto_archive_duration", autoArchiveMinutes);
 
-        URI uri = URI.create(API + "/channels/" + anchor.channelId()
+        URI uri = URI.create(DiscordPresenceConfig.getBotApiBase() + "/channels/" + anchor.channelId()
                 + "/messages/" + anchor.messageId() + "/threads");
 
-        HttpRequest req = HttpRequest.newBuilder(uri)
-                .header("Authorization", "Bot " + token)
+        HttpRequest req = DiscordHttp.botRequest(uri)
                 .header("Content-Type", "application/json")
-                .header("User-Agent", "DiscordPresence-Mod")
-                .timeout(DiscordHttp.TIMEOUT)
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
                 .build();
 
@@ -89,17 +84,13 @@ final class DiscordThreadClient {
         if (threadId == null || threadId.isBlank()) {
             return CompletableFuture.completedFuture(null);
         }
-        String token = DiscordPresenceConfig.getBotToken();
-        if (token.isBlank()) {
+        if (DiscordHttp.botUnavailable()) {
             return CompletableFuture.completedFuture(null);
         }
 
-        URI uri = URI.create(API + "/channels/" + threadId);
+        URI uri = URI.create(DiscordPresenceConfig.getBotApiBase() + "/channels/" + threadId);
 
-        HttpRequest req = HttpRequest.newBuilder(uri)
-                .header("Authorization", "Bot " + token)
-                .header("User-Agent", "DiscordPresence-Mod")
-                .timeout(DiscordHttp.TIMEOUT)
+        HttpRequest req = DiscordHttp.botRequest(uri)
                 .GET()
                 .build();
 
@@ -126,8 +117,7 @@ final class DiscordThreadClient {
         if (channelId == null) {
             return CompletableFuture.completedFuture(null);
         }
-        String token = DiscordPresenceConfig.getBotToken();
-        if (token.isBlank()) {
+        if (DiscordHttp.botUnavailable()) {
             return CompletableFuture.completedFuture(null);
         }
 
@@ -159,13 +149,10 @@ final class DiscordThreadClient {
         allowedMentions.add("parse", new JsonArray());
         body.add("allowed_mentions", allowedMentions);
 
-        URI uri = URI.create(API + "/channels/" + channelId + "/messages");
+        URI uri = URI.create(DiscordPresenceConfig.getBotApiBase() + "/channels/" + channelId + "/messages");
 
-        HttpRequest req = HttpRequest.newBuilder(uri)
-                .header("Authorization", "Bot " + token)
+        HttpRequest req = DiscordHttp.botRequest(uri)
                 .header("Content-Type", "application/json")
-                .header("User-Agent", "DiscordPresence-Mod")
-                .timeout(DiscordHttp.TIMEOUT)
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
                 .build();
 

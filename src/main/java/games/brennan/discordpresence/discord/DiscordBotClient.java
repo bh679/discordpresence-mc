@@ -27,7 +27,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class DiscordBotClient {
 
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final String API = "https://discord.com/api/v10";
 
     /** One-shot WARN de-dupe so a misconfigured token/perms doesn't spam the log. */
     private static final AtomicBoolean WARNED_AUTH = new AtomicBoolean(false);
@@ -46,22 +45,18 @@ final class DiscordBotClient {
         if (ref == null || emoji == null || emoji.isBlank()) {
             return CompletableFuture.completedFuture(null);
         }
-        String token = DiscordPresenceConfig.getBotToken();
-        if (token.isBlank()) {
+        if (DiscordHttp.botUnavailable()) {
             return CompletableFuture.completedFuture(null);
         }
 
         // Only the emoji segment is encoded (UTF-8 percent-encoding). The ids are
         // numeric snowflakes and '@me' is a literal — both safe unencoded.
         String enc = URLEncoder.encode(emoji, StandardCharsets.UTF_8);
-        URI uri = URI.create(API + "/channels/" + ref.channelId()
+        URI uri = URI.create(DiscordPresenceConfig.getBotApiBase() + "/channels/" + ref.channelId()
                 + "/messages/" + ref.messageId()
                 + "/reactions/" + enc + "/@me");
 
-        HttpRequest req = HttpRequest.newBuilder(uri)
-                .header("Authorization", "Bot " + token)
-                .header("User-Agent", "DiscordPresence-Mod")
-                .timeout(DiscordHttp.TIMEOUT)
+        HttpRequest req = DiscordHttp.botRequest(uri)
                 .method(method, HttpRequest.BodyPublishers.noBody())
                 .build();
 

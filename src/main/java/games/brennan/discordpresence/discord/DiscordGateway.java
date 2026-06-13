@@ -31,7 +31,7 @@ import java.util.function.Consumer;
  * reconnect-looping. All I/O is off the server thread; parsed messages are handed
  * to {@code onMessage} which is responsible for hopping back to the game thread.</p>
  */
-final class DiscordGateway {
+final class DiscordGateway implements GatewayConnection {
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final String GATEWAY_BOT_URL = "https://discord.com/api/v10/gateway/bot";
@@ -62,7 +62,7 @@ final class DiscordGateway {
 
     // --- lifecycle ---
 
-    void start() {
+    public void start() {
         if (token == null || token.isBlank()) {
             LOGGER.warn("Discord gateway not started: bot token is blank.");
             return;
@@ -71,7 +71,7 @@ final class DiscordGateway {
         connect(false);
     }
 
-    void stop() {
+    public void stop() {
         running = false;
         stopHeartbeat();
         WebSocket ws = webSocket;

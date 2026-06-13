@@ -64,6 +64,7 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec SPEC;
     public static final ModConfigSpec.ConfigValue<String> WEBHOOK_URL;
     public static final ModConfigSpec.ConfigValue<String> BOT_TOKEN;
+    public static final ModConfigSpec.ConfigValue<String> RELAY_BASE_URL;
     public static final ModConfigSpec.ConfigValue<String> JOIN_MESSAGE_TEMPLATE;
     public static final ModConfigSpec.ConfigValue<String> FIRST_JOIN_MESSAGE_TEMPLATE;
     public static final ModConfigSpec.ConfigValue<String> ONLINE_EMOJI;
@@ -107,6 +108,14 @@ public final class DiscordPresenceConfig {
                          "Create Public Threads, and Send Messages in Threads.",
                          "Leave blank to post messages without reactions/threads. SECRET — do not share or commit.")
                 .define("botToken", "");
+        RELAY_BASE_URL = b
+                .comment("Optional relay base URL. When set, Discord Presence routes ALL Discord I/O through",
+                         "this relay instead of Discord directly: webhook posts go to '<base>/hook' and bot",
+                         "REST (reactions/threads/advancement embeds) to '<base>/bot', with NO bot token sent",
+                         "(the relay holds + injects it server-side). Lets a bundling mod — or you — point DP",
+                         "at a central feed without holding any Discord secret. Blank = talk to Discord directly",
+                         "using webhookUrl + botToken above.")
+                .define("relayBaseUrl", "");
         JOIN_MESSAGE_TEMPLATE = b
                 .comment("Message posted when a returning player logs in. When threads are enabled this is",
                          "posted INSIDE the player's thread. '{player}' is replaced with the player's name.")
@@ -263,12 +272,65 @@ public final class DiscordPresenceConfig {
         return SPEC.isLoaded();
     }
 
+    /**
+     * Precedence for merging the admin's config value with a bundling mod's
+     * provider value (see {@link DiscordCredentials}). PROVIDER_WINS = a bundling
+     * mod's central feed overrides local config; flip to CONFIG_WINS to let a
+     * server owner's own webhook/token take priority. Standalone DP (no provider)
+     * is unaffected either way — the provider value is blank.
+     */
+    private static final CredentialResolver.Policy CREDENTIAL_POLICY =
+            CredentialResolver.Policy.PROVIDER_WINS;
+
+    /**
+     * Resolved relay base URL, or {@code ""} for direct-to-Discord. When non-blank, DP is in
+     * RELAY-MODE: it routes webhook + bot REST through the relay and sends no bot token. Any
+     * trailing slash is stripped so derived paths are {@code <base>/hook}, not {@code <base>//hook}.
+     */
+    public static String getRelayBaseUrl() {
+        String configValue = isLoaded() ? RELAY_BASE_URL.get() : "";
+        String resolved = CredentialResolver.resolve(configValue, DiscordCredentials.providerRelayBaseUrl(), CREDENTIAL_POLICY);
+        return resolved.endsWith("/") ? resolved.substring(0, resolved.length() - 1) : resolved;
+    }
+
+    /** Whether a relay base URL is configured (route via the relay; send no bot token). */
+    public static boolean isRelayMode() {
+        return !getRelayBaseUrl().isBlank();
+    }
+
     public static String getWebhookUrl() {
-        return isLoaded() ? WEBHOOK_URL.get() : "";
+        String relay = getRelayBaseUrl();
+        if (!relay.isBlank()) {
+            return relay + "/hook";
+        }
+        String configValue = isLoaded() ? WEBHOOK_URL.get() : "";
+        return CredentialResolver.resolve(configValue, DiscordCredentials.providerWebhookUrl(), CREDENTIAL_POLICY);
+    }
+
+    /** Base URL for bot REST calls: the relay's {@code /bot} in relay-mode, else Discord's API directly. */
+    public static String getBotApiBase() {
+        String relay = getRelayBaseUrl();
+        return relay.isBlank() ? "https://discord.com/api/v10" : relay + "/bot";
+    }
+
+    /**
+     * WebSocket URL for the relay's inbound gateway ({@code <relayBase>/gateway} with a ws/wss
+     * scheme), or {@code ""} when not in relay-mode.
+     */
+    public static String getRelayGatewayUrl() {
+        String base = getRelayBaseUrl();
+        if (base.isBlank()) {
+            return "";
+        }
+        String ws = base.startsWith("https://") ? "wss://" + base.substring("https://".length())
+                : base.startsWith("http://") ? "ws://" + base.substring("http://".length())
+                : base;
+        return ws + "/gateway";
     }
 
     public static String getBotToken() {
-        return isLoaded() ? BOT_TOKEN.get() : "";
+        String configValue = isLoaded() ? BOT_TOKEN.get() : "";
+        return CredentialResolver.resolve(configValue, DiscordCredentials.providerBotToken(), CREDENTIAL_POLICY);
     }
 
     public static String getJoinMessageTemplate() {

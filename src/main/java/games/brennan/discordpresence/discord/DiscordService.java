@@ -89,7 +89,7 @@ public final class DiscordService {
     private final AtomicBoolean warnedBlankContent = new AtomicBoolean(false);
 
     private volatile MinecraftServer server;
-    private volatile DiscordGateway gateway;
+    private volatile GatewayConnection gateway;
 
     private DiscordService() {}
 
@@ -132,13 +132,19 @@ public final class DiscordService {
         if (!enabled() || !networkAllowed(startedServer) || !DiscordPresenceConfig.isRelayDiscordToGame()) {
             return;
         }
-        String token = DiscordPresenceConfig.getBotToken();
-        if (token.isBlank()) {
-            LOGGER.warn("relayDiscordToGame is on but botToken is blank — gateway not started.");
-            return;
+        GatewayConnection gw;
+        if (DiscordPresenceConfig.isRelayMode()) {
+            LOGGER.info("Discord Presence: starting relay gateway…");
+            gw = new RelayGateway(DiscordPresenceConfig.getRelayGatewayUrl(), this::onDiscordMessage);
+        } else {
+            String token = DiscordPresenceConfig.getBotToken();
+            if (token.isBlank()) {
+                LOGGER.warn("relayDiscordToGame is on but botToken is blank — gateway not started.");
+                return;
+            }
+            LOGGER.info("Discord Presence: starting gateway…");
+            gw = new DiscordGateway(token, this::onDiscordMessage);
         }
-        LOGGER.info("Discord Presence: starting gateway…");
-        DiscordGateway gw = new DiscordGateway(token, this::onDiscordMessage);
         this.gateway = gw;
         gw.start();
     }
@@ -415,7 +421,7 @@ public final class DiscordService {
 
     /** Drop per-session tracking + close the gateway on server stop (the durable store stays on disk). */
     public void clearAll() {
-        DiscordGateway gw = gateway;
+        GatewayConnection gw = gateway;
         gateway = null;
         if (gw != null) {
             gw.stop();
