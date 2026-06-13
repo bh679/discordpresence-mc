@@ -1,5 +1,8 @@
 package games.brennan.discordpresence.discord;
 
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
+
 import java.net.http.WebSocket;
 import java.util.concurrent.CompletionStage;
 
@@ -16,6 +19,8 @@ import java.util.concurrent.CompletionStage;
  */
 final class GatewayListener implements WebSocket.Listener {
 
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     private final DiscordGateway gateway;
     private final StringBuilder buffer = new StringBuilder();
 
@@ -25,11 +30,14 @@ final class GatewayListener implements WebSocket.Listener {
 
     @Override
     public void onOpen(WebSocket webSocket) {
+        LOGGER.debug("Discord gateway WS onOpen — requesting first frame.");
+        gateway.onOpen(webSocket);
         webSocket.request(1);
     }
 
     @Override
     public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+        LOGGER.debug("Discord gateway WS onText (len={}, last={}).", data.length(), last);
         buffer.append(data);
         if (last) {
             String complete = buffer.toString();

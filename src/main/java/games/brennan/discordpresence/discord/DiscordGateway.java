@@ -96,6 +96,7 @@ final class DiscordGateway {
         if (!running) {
             return;
         }
+        LOGGER.info("Discord gateway connect(resume={})…", resume);
         reconnecting.set(false);
         boolean canResume = resume && sessionId != null && lastSeq != null && resumeGatewayUrl != null;
         this.resuming = canResume;
@@ -120,7 +121,8 @@ final class DiscordGateway {
     }
 
     private void openSocket(String baseUrl) {
-        String url = baseUrl + GatewayPayloads.GATEWAY_QUERY;
+        String sep = baseUrl.endsWith("/") ? "" : "/";
+        String url = baseUrl + sep + GatewayPayloads.GATEWAY_QUERY;
         try {
             DiscordHttp.CLIENT.newWebSocketBuilder()
                     .connectTimeout(DiscordHttp.TIMEOUT)
@@ -130,10 +132,10 @@ final class DiscordGateway {
                             LOGGER.warn("Discord gateway connect failed: {}",
                                     err != null ? err.toString() : "null socket");
                             reconnect(true);
-                        } else {
-                            webSocket = ws;
-                            lastSend.set(CompletableFuture.completedFuture(ws));
                         }
+                        // On success, webSocket + lastSend are assigned in onOpen (which the JDK
+                        // guarantees to run before any frame). Doing it here races with frame
+                        // delivery — HELLO can arrive first, so IDENTIFY would see a null socket.
                     });
         } catch (Exception e) {
             LOGGER.warn("Discord gateway connect threw: {}", e.toString());
@@ -246,6 +248,17 @@ final class DiscordGateway {
     }
 
     // --- inbound frames (called from the WebSocket thread via GatewayListener) ---
+
+    /**
+     * Called by the listener the instant the socket opens — before any frame — so the
+     * first sends (IDENTIFY / RESUME, triggered by HELLO) have a non-null target. The
+     * JDK guarantees {@code onOpen} runs before {@code onText}, which the late
+     * {@code buildAsync} completion does not.
+     */
+    void onOpen(WebSocket ws) {
+        this.webSocket = ws;
+        this.lastSend.set(CompletableFuture.completedFuture(ws));
+    }
 
     void onText(String text) {
         JsonObject payload;

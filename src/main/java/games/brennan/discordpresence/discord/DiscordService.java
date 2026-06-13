@@ -86,6 +86,10 @@ public final class DiscordService {
     /** Opens the gateway (if inbound relay is enabled and consented) once the server is up. */
     public void onServerStarted(MinecraftServer startedServer) {
         this.server = startedServer;
+        LOGGER.info("Discord Presence onServerStarted: dedicated={}, webhookSet={}, consent={}, relayDiscordToGame={}, botTokenSet={}",
+                startedServer.isDedicatedServer(), enabled(),
+                DiscordPresenceClientConfig.getConsent(), DiscordPresenceConfig.isRelayDiscordToGame(),
+                !DiscordPresenceConfig.getBotToken().isBlank());
         if (!enabled() || !networkAllowed(startedServer) || !DiscordPresenceConfig.isRelayDiscordToGame()) {
             return;
         }
@@ -94,6 +98,7 @@ public final class DiscordService {
             LOGGER.warn("relayDiscordToGame is on but botToken is blank — gateway not started.");
             return;
         }
+        LOGGER.info("Discord Presence: starting gateway…");
         DiscordGateway gw = new DiscordGateway(token, this::onDiscordMessage);
         this.gateway = gw;
         gw.start();
@@ -185,6 +190,11 @@ public final class DiscordService {
      * hops to the server thread before broadcasting.
      */
     public void onDiscordMessage(InboundMessage msg) {
+        if (msg != null) {
+            LOGGER.debug("Discord inbound: author={}, ref={}, channel={}, bot={}, webhook={}, anchored={}",
+                    msg.authorName(), msg.referencedMessageId(), msg.channelId(), msg.bot(), msg.hasWebhookId(),
+                    reverse.contains(msg.referencedMessageId()) || reverse.contains(msg.channelId()));
+        }
         if (!isRelayable(msg, reverse)) {
             return; // our own posts/bots, or not anchored to a tracked player message
         }
