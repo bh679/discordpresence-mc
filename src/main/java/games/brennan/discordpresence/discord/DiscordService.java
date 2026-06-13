@@ -5,6 +5,7 @@ import games.brennan.discordpresence.config.DiscordPresenceConfig;
 import net.minecraft.ChatFormatting;
 import net.minecraft.advancements.AdvancementHolder;
 import net.minecraft.advancements.DisplayInfo;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.fml.loading.FMLPaths;
 import org.slf4j.Logger;
@@ -176,18 +177,20 @@ public final class DiscordService {
             threadFuture = CompletableFuture.completedFuture(existing);
         }
 
-        // Title + full description + frame colour come from the advancement's display
-        // (rendered as a coloured embed); the content line is the configurable attribution.
+        // Title + description + frame colour + icon come from the advancement's display
+        // (rendered as a coloured embed with the item icon as a thumbnail); the content
+        // line is the configurable attribution.
         String title = display.map(d -> d.getTitle().getString()).orElse(holder.id().toString());
         String description = display.map(d -> d.getDescription().getString()).orElse("");
         Integer color = display.map(DiscordService::frameColor).orElse(null);
+        String iconUrl = iconUrlFor(display);
         String content = formatAdvancement(
                 DiscordPresenceConfig.getAdvancementMessageTemplate(),
                 player.getGameProfile().getName(), title);
 
         threadFuture.thenAccept(threadId -> {
             if (threadId != null) {
-                DiscordThreadClient.postEmbed(threadId, content, title, description, color);
+                DiscordThreadClient.postEmbed(threadId, content, title, description, color, iconUrl);
             }
         });
     }
@@ -196,6 +199,21 @@ public final class DiscordService {
     private static Integer frameColor(DisplayInfo display) {
         ChatFormatting chatColor = display.getType().getChatColor();
         return chatColor != null ? chatColor.getColor() : null;
+    }
+
+    /**
+     * The thumbnail URL for the advancement's icon item, or null when the icon is
+     * disabled or there is no display. Resolves the icon {@link net.minecraft.world.item.ItemStack}
+     * to its registry id and substitutes it into the configured template.
+     */
+    private static String iconUrlFor(Optional<DisplayInfo> display) {
+        if (!DiscordPresenceConfig.isShowAdvancementIcon() || display.isEmpty()) {
+            return null;
+        }
+        var iconId = BuiltInRegistries.ITEM.getKey(display.get().getIcon().getItem());
+        return advancementIconUrl(
+                DiscordPresenceConfig.getAdvancementIconUrlTemplate(),
+                iconId.getNamespace(), iconId.getPath());
     }
 
     /** Drop per-session tracking on server stop (the durable store stays on disk). */
@@ -238,5 +256,20 @@ public final class DiscordService {
     /** Replace {@code {player}} and {@code {advancement}} in a template. */
     static String formatAdvancement(String template, String player, String advancement) {
         return template.replace("{player}", player).replace("{advancement}", advancement);
+    }
+
+    /**
+     * Build the advancement icon thumbnail URL by substituting the icon item's
+     * registry id into {@code template} ({@code {namespace}} / {@code {path}}
+     * placeholders), or null when the template or path is blank. Registry paths are
+     * limited to {@code [a-z0-9_.-/]}, so no URL-encoding is needed.
+     */
+    static String advancementIconUrl(String template, String namespace, String path) {
+        if (template == null || template.isBlank() || path == null || path.isBlank()) {
+            return null;
+        }
+        return template
+                .replace("{namespace}", namespace == null ? "" : namespace)
+                .replace("{path}", path);
     }
 }
