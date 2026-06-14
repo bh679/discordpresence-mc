@@ -30,6 +30,9 @@ public final class DiscordPresenceConfig {
     public static final boolean DEFAULT_SHOW_ADVANCEMENT_ICON = true;
     public static final String DEFAULT_ADVANCEMENT_ICON_URL_TEMPLATE =
             "https://static.minecraftitemids.com/64/{path}.png";
+    public static final boolean DEFAULT_SHOW_ADVANCEMENT_REQUIREMENTS = true;
+    public static final int DEFAULT_ADVANCEMENT_REQUIREMENTS_MAX = 5;
+    public static final String DEFAULT_ADVANCEMENT_REQUIREMENTS_LABEL = "Requirements";
 
     public static final boolean DEFAULT_AUTO_DEATH_REPORT = true;
     public static final int DEFAULT_DEATH_REPORT_EMBED_COLOR = 0xFF5555; // death-red
@@ -89,6 +92,9 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_RESPONSE_GROUP_MESSAGES;
     public static final ModConfigSpec.BooleanValue SHOW_ADVANCEMENT_ICON;
     public static final ModConfigSpec.ConfigValue<String> ADVANCEMENT_ICON_URL_TEMPLATE;
+    public static final ModConfigSpec.BooleanValue SHOW_ADVANCEMENT_REQUIREMENTS;
+    public static final ModConfigSpec.IntValue ADVANCEMENT_REQUIREMENTS_MAX;
+    public static final ModConfigSpec.ConfigValue<String> ADVANCEMENT_REQUIREMENTS_LABEL;
     public static final ModConfigSpec.BooleanValue AUTO_DEATH_REPORT;
     public static final ModConfigSpec.IntValue DEATH_REPORT_EMBED_COLOR;
     public static final ModConfigSpec.BooleanValue SHOW_DEATH_REPORT_IMAGE;
@@ -194,6 +200,19 @@ public final class DiscordPresenceConfig {
                          "item/block icons only — for modded advancements, point this at your own render host,",
                          "e.g. 'https://my-host/icons/{namespace}/{path}.png'.")
                 .define("advancementIconUrlTemplate", DEFAULT_ADVANCEMENT_ICON_URL_TEMPLATE);
+        SHOW_ADVANCEMENT_REQUIREMENTS = b
+                .comment("Add a 'Requirements' field to the advancement embed listing the advancement's actual",
+                         "sub-goals (its criteria — e.g. the biomes for Adventuring Time, foods for A Balanced",
+                         "Diet). Only sub-goals NOT already reflected in the description are listed, so simple",
+                         "advancements stay unchanged. The list is capped (see advancementRequirementsMax).")
+                .define("showAdvancementRequirements", DEFAULT_SHOW_ADVANCEMENT_REQUIREMENTS);
+        ADVANCEMENT_REQUIREMENTS_MAX = b
+                .comment("Maximum number of sub-goals to list in the Requirements field before truncating with",
+                         "a '+N more' suffix. Keeps long advancements (e.g. ~42 biomes) readable.")
+                .defineInRange("advancementRequirementsMax", DEFAULT_ADVANCEMENT_REQUIREMENTS_MAX, 1, 25);
+        ADVANCEMENT_REQUIREMENTS_LABEL = b
+                .comment("Title of the Requirements embed field (the bold label shown above the sub-goal list).")
+                .define("advancementRequirementsLabel", DEFAULT_ADVANCEMENT_REQUIREMENTS_LABEL);
         AUTO_DEATH_REPORT = b
                 .comment("Post a rich 'death report' embed when a player dies: the death cause, basic stats",
                          "(score, location, dimension, XP) and a composed image of the items they were holding",
@@ -427,6 +446,18 @@ public final class DiscordPresenceConfig {
 
     public static String getAdvancementIconUrlTemplate() {
         return isLoaded() ? ADVANCEMENT_ICON_URL_TEMPLATE.get() : DEFAULT_ADVANCEMENT_ICON_URL_TEMPLATE;
+    }
+
+    public static boolean isShowAdvancementRequirements() {
+        return isLoaded() ? SHOW_ADVANCEMENT_REQUIREMENTS.get() : DEFAULT_SHOW_ADVANCEMENT_REQUIREMENTS;
+    }
+
+    public static int getAdvancementRequirementsMax() {
+        return isLoaded() ? ADVANCEMENT_REQUIREMENTS_MAX.get() : DEFAULT_ADVANCEMENT_REQUIREMENTS_MAX;
+    }
+
+    public static String getAdvancementRequirementsLabel() {
+        return isLoaded() ? ADVANCEMENT_REQUIREMENTS_LABEL.get() : DEFAULT_ADVANCEMENT_REQUIREMENTS_LABEL;
     }
 
     public static boolean isAutoDeathReport() {

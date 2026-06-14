@@ -20,8 +20,10 @@ import org.slf4j.Logger;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -431,10 +433,11 @@ public final class DiscordService {
         String content = formatAdvancement(
                 DiscordPresenceConfig.getAdvancementMessageTemplate(),
                 player.getGameProfile().getName(), title);
+        List<DeathField> fields = advancementFields(holder, description);
 
         threadFuture.thenAccept(threadId -> {
             if (threadId != null) {
-                DiscordThreadClient.postEmbed(threadId, content, title, description, color, iconUrl);
+                DiscordThreadClient.postEmbed(threadId, content, title, description, color, iconUrl, fields);
             }
         });
     }
@@ -458,6 +461,25 @@ public final class DiscordService {
         return advancementIconUrl(
                 DiscordPresenceConfig.getAdvancementIconUrlTemplate(),
                 iconId.getNamespace(), iconId.getPath());
+    }
+
+    /**
+     * Optional embed fields for an advancement: the configurable "Requirements" field
+     * listing the sub-goals (criteria) not already named in {@code description}, or an
+     * empty list when the feature is disabled or nothing novel remains.
+     */
+    private static List<DeathField> advancementFields(AdvancementHolder holder, String description) {
+        if (!DiscordPresenceConfig.isShowAdvancementRequirements()) {
+            return List.of();
+        }
+        String reqs = advancementRequirements(
+                holder.value().criteria().keySet(),
+                description,
+                DiscordPresenceConfig.getAdvancementRequirementsMax());
+        if (reqs == null) {
+            return List.of();
+        }
+        return List.of(new DeathField(DiscordPresenceConfig.getAdvancementRequirementsLabel(), reqs));
     }
 
     /** Drop per-session tracking + close the gateway on server stop (the durable store stays on disk). */
@@ -670,5 +692,95 @@ public final class DiscordService {
         return template
                 .replace("{namespace}", namespace == null ? "" : namespace)
                 .replace("{path}", path);
+    }
+
+    /** Discord embed field values are capped at 1024 chars; trim with an ellipsis if over. */
+    private static final int MAX_FIELD_VALUE = 1024;
+
+    /**
+     * Build the "actual requirements" field value for an advancement: its sub-goal
+     * criteria names (e.g. the biomes for <i>Adventuring Time</i>, the foods for
+     * <i>A Balanced Diet</i>) that are <b>not already reflected in {@code description}</b>,
+     * prettified, de-duplicated, sorted, and capped to {@code max} with a
+     * {@code +N more} suffix. Returns {@code null} when nothing novel remains, so the
+     * caller adds no field. Pure (no game/config access) → unit-tested.
+     *
+     * <p>"Not already in the description" = the criterion's normalized name is not a
+     * substring of the normalized description — this is the user's "if different" intent,
+     * so a sub-goal the description already names is omitted. Names normalizing to fewer
+     * than 3 characters are always kept (short substrings match unreliably).</p>
+     */
+    static String advancementRequirements(Collection<String> criterionKeys, String description, int max) {
+        if (criterionKeys == null || criterionKeys.isEmpty()) {
+            return null;
+        }
+        String descNorm = normalizeForMatch(description);
+        List<String> novel = criterionKeys.stream()
+                .filter(k -> k != null && !k.isBlank())
+                .map(DiscordService::prettifyCriterion)
+                .filter(name -> !name.isBlank())
+                .filter(name -> {
+                    String norm = normalizeForMatch(name);
+                    return norm.length() < 3 || !descNorm.contains(norm);
+                })
+                .distinct()
+                .sorted()
+                .toList();
+        if (novel.isEmpty()) {
+            return null;
+        }
+        int cap = Math.max(1, max);
+        String joined = novel.size() <= cap
+                ? String.join(", ", novel)
+                : String.join(", ", novel.subList(0, cap)) + ", +" + (novel.size() - cap) + " more";
+        return joined.length() <= MAX_FIELD_VALUE ? joined : joined.substring(0, MAX_FIELD_VALUE - 1) + "…";
+    }
+
+    /**
+     * Human-readable display form of a criterion key: strip any namespace/path
+     * ({@code minecraft:badlands} → {@code badlands}; last {@code /} segment), turn
+     * {@code _}/{@code -} into spaces and Title-Case each word ({@code birch_forest} →
+     * {@code Birch Forest}). Returns "" for null/blank.
+     */
+    static String prettifyCriterion(String key) {
+        if (key == null) {
+            return "";
+        }
+        String core = key.trim();
+        int colon = core.lastIndexOf(':');
+        if (colon >= 0) {
+            core = core.substring(colon + 1);
+        }
+        int slash = core.lastIndexOf('/');
+        if (slash >= 0) {
+            core = core.substring(slash + 1);
+        }
+        core = core.replace('_', ' ').replace('-', ' ');
+        StringBuilder sb = new StringBuilder(core.length());
+        for (String word : core.split("\\s+")) {
+            if (word.isEmpty()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(' ');
+            }
+            sb.append(Character.toUpperCase(word.charAt(0)));
+            if (word.length() > 1) {
+                sb.append(word.substring(1));
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Normalize text for substring matching: lower-case, collapse every run of
+     * non-alphanumeric characters to a single space, and trim. Used to compare a
+     * criterion name against the advancement description.
+     */
+    static String normalizeForMatch(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim();
     }
 }
