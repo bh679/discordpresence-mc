@@ -24,6 +24,7 @@ public final class DiscordPresenceConfig {
     public static final String DEFAULT_FIRST_JOIN_TEMPLATE = "🎮 **{player}** joined the game for the first time";
     public static final String DEFAULT_ONLINE_EMOJI = "🟢"; // 🟢
     public static final String DEFAULT_DEATH_EMOJI = "💀";  // 💀
+    public static final int DEFAULT_ONLINE_REACTION_REFRESH_MINUTES = 15;
     public static final String DEFAULT_THREAD_NAME_TEMPLATE = "{player}";
     public static final int DEFAULT_THREAD_AUTO_ARCHIVE_MINUTES = 10080; // 1 week
     public static final String DEFAULT_ADVANCEMENT_TEMPLATE = "{player} earned";
@@ -72,6 +73,7 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.ConfigValue<String> FIRST_JOIN_MESSAGE_TEMPLATE;
     public static final ModConfigSpec.ConfigValue<String> ONLINE_EMOJI;
     public static final ModConfigSpec.ConfigValue<String> DEATH_EMOJI;
+    public static final ModConfigSpec.IntValue ONLINE_REACTION_REFRESH_MINUTES;
     public static final ModConfigSpec.BooleanValue RELAY_DISCORD_TO_GAME;
     public static final ModConfigSpec.BooleanValue RELAY_GAME_TO_DISCORD;
     public static final ModConfigSpec.ConfigValue<String> DISCORD_TO_GAME_FORMAT;
@@ -139,6 +141,15 @@ public final class DiscordPresenceConfig {
                 .comment("Emoji reaction added to the join message when the player dies.",
                          "A standard unicode emoji (e.g. 💀). Leave blank to skip the death reaction.")
                 .define("deathEmoji", DEFAULT_DEATH_EMOJI);
+        ONLINE_REACTION_REFRESH_MINUTES = b
+                .comment("Minutes between refreshes of the online reaction (a heartbeat). While a player is",
+                         "online the green reaction and a persisted 'last seen' timestamp are refreshed on this",
+                         "cadence. If a session is never refreshed — because the server crashed without removing",
+                         "the reaction — the stale green reaction is cleared on the next server start (and during",
+                         "this refresh if a player left but the removal failed), so they are no longer shown as",
+                         "online. 0 disables the periodic refresh (startup crash-cleanup still runs). Requires the",
+                         "bot token and a non-blank onlineEmoji.")
+                .defineInRange("onlineReactionRefreshMinutes", DEFAULT_ONLINE_REACTION_REFRESH_MINUTES, 0, 1440);
         RELAY_DISCORD_TO_GAME = b
                 .comment("Relay messages from Discord into in-game chat. Requires the bot token AND the",
                          "Message Content privileged intent enabled in the Discord Developer Portal.",
@@ -366,6 +377,10 @@ public final class DiscordPresenceConfig {
 
     public static String getDeathEmoji() {
         return isLoaded() ? DEATH_EMOJI.get() : DEFAULT_DEATH_EMOJI;
+    }
+
+    public static int getOnlineReactionRefreshMinutes() {
+        return isLoaded() ? ONLINE_REACTION_REFRESH_MINUTES.get() : DEFAULT_ONLINE_REACTION_REFRESH_MINUTES;
     }
 
     public static boolean isRelayDiscordToGame() {
