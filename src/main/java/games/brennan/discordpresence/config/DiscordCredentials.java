@@ -3,6 +3,7 @@ package games.brennan.discordpresence.config;
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
 
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
@@ -65,6 +66,14 @@ public final class DiscordCredentials {
         } catch (Throwable t) {
             return false;
         }
+    }
+
+    /**
+     * The provider's join-message suffix block for this player, or {@code ""} when none is
+     * registered / it fails. Reuses {@link #read} for the null- and throwable-safe contract.
+     */
+    public static String providerJoinSuffix(UUID playerId, String playerName) {
+        return read(p -> p.joinMessageSuffix(playerId, playerName));
     }
 
     /** Snapshot the volatile slot and read one field, mapping null / any throwable to {@code ""}. */

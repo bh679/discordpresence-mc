@@ -1,5 +1,7 @@
 package games.brennan.discordpresence.config;
 
+import java.util.UUID;
+
 /**
  * Supplies Discord credentials at runtime so a mod that <b>bundles</b> Discord
  * Presence (e.g. Dungeon Train via jarJar) can light up a central feed
@@ -52,5 +54,16 @@ public interface DiscordCredentialsProvider {
      */
     default boolean suppressAutoDeathReport() {
         return false;
+    }
+
+    /**
+     * Optional extra block appended below each join / first-join message — e.g. a bundling mod's
+     * {@code "DungeonTrain 0.298.0"} line, optionally plus a relay ping-marker for a specific
+     * player. Called on the server thread during join handling. {@code ""}/{@code null} = nothing
+     * appended; standalone DP leaves its join messages unchanged. The arguments identify the
+     * joining player so a provider can vary the block per player (e.g. a one-time milestone tag).
+     */
+    default String joinMessageSuffix(UUID playerId, String playerName) {
+        return "";
     }
 }

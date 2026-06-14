@@ -3,6 +3,7 @@ package games.brennan.discordpresence.discord;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
+import games.brennan.discordpresence.config.DiscordCredentials;
 import games.brennan.discordpresence.config.DiscordPresenceClientConfig;
 import games.brennan.discordpresence.config.DiscordPresenceConfig;
 import net.minecraft.ChatFormatting;
@@ -161,7 +162,7 @@ public final class DiscordService {
 
         if (!DiscordPresenceConfig.isCreateThreadOnJoin()) {
             // Threads disabled: plain per-session top-level message + reactions (v0.1.0 behaviour).
-            String content = format(DiscordPresenceConfig.getJoinMessageTemplate(), name);
+            String content = joinBody(DiscordPresenceConfig.getJoinMessageTemplate(), uuid, name);
             sessionMessages.put(uuid, trackForReplies(postAndReact(content, name, uuid, null, onlineEmoji), uuid));
             return;
         }
@@ -176,7 +177,7 @@ public final class DiscordService {
             reverse.put(threadId, uuid);
             threadFutures.put(uuid, CompletableFuture.completedFuture(threadId));
 
-            String content = format(DiscordPresenceConfig.getJoinMessageTemplate(), name);
+            String content = joinBody(DiscordPresenceConfig.getJoinMessageTemplate(), uuid, name);
             trackForReplies(DiscordWebhookClient.post(content, name, uuid, threadId), uuid);
 
             sessionMessages.put(uuid, anchorRef(uuid, stored).thenApply(anchor -> {
@@ -190,7 +191,7 @@ public final class DiscordService {
 
         // First join ever: post the top-level anchor, react on it, index it (its id == the thread
         // id), and create the player's thread from it (persisting the anchor ref once it resolves).
-        String content = format(DiscordPresenceConfig.getFirstJoinMessageTemplate(), name);
+        String content = joinBody(DiscordPresenceConfig.getFirstJoinMessageTemplate(), uuid, name);
         CompletableFuture<DiscordMessageRef> anchor =
                 DiscordWebhookClient.post(content, name, uuid, null);
 
@@ -650,6 +651,17 @@ public final class DiscordService {
     /** Replace {@code {player}} in a template. */
     static String format(String template, String player) {
         return template.replace("{player}", player);
+    }
+
+    /**
+     * Build a join-message body: fill {@code {player}} in the template, then append the bundling
+     * mod's optional join-suffix block (e.g. a version line / relay ping-marker) on its own line.
+     * Standalone DP (no provider) leaves the body unchanged.
+     */
+    static String joinBody(String template, UUID uuid, String player) {
+        String body = format(template, player);
+        String suffix = DiscordCredentials.providerJoinSuffix(uuid, player);
+        return suffix.isBlank() ? body : body + "\n" + suffix;
     }
 
     /** Replace {@code {player}} and {@code {advancement}} in a template. */
