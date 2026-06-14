@@ -11,6 +11,7 @@ import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -106,14 +107,15 @@ final class DiscordThreadClient {
     /**
      * Post an advancement message into the channel/thread as the bot: an optional
      * {@code content} attribution line plus a coloured embed (title + description,
-     * with an optional {@code iconUrl} thumbnail at the top-right), the embed colour
+     * with an optional {@code iconUrl} thumbnail at the top-right and optional
+     * {@code fields}, e.g. the advancement's requirements), the embed colour
      * matching the in-game advancement frame.
      *
      * @return a future of the posted message ref, or {@code null} on failure.
      */
     static CompletableFuture<DiscordMessageRef> postEmbed(String channelId, String content,
                                                           String title, String description, Integer color,
-                                                          String iconUrl) {
+                                                          String iconUrl, List<DeathField> fields) {
         if (channelId == null) {
             return CompletableFuture.completedFuture(null);
         }
@@ -135,6 +137,23 @@ final class DiscordThreadClient {
             JsonObject thumbnail = new JsonObject();
             thumbnail.addProperty("url", iconUrl);
             embed.add("thumbnail", thumbnail); // ~80px image, top-right of the embed
+        }
+        if (fields != null && !fields.isEmpty()) {
+            JsonArray fieldArr = new JsonArray();
+            for (DeathField f : fields) {
+                if (f == null || f.name() == null || f.value() == null
+                        || f.name().isBlank() || f.value().isBlank()) {
+                    continue;
+                }
+                JsonObject jf = new JsonObject();
+                jf.addProperty("name", f.name());
+                jf.addProperty("value", f.value());
+                jf.addProperty("inline", false); // full-width block (the requirements list)
+                fieldArr.add(jf);
+            }
+            if (!fieldArr.isEmpty()) {
+                embed.add("fields", fieldArr);
+            }
         }
         JsonArray embeds = new JsonArray();
         embeds.add(embed);
