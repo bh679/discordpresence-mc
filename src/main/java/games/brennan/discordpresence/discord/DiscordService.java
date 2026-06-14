@@ -162,8 +162,8 @@ public final class DiscordService {
 
         if (!DiscordPresenceConfig.isCreateThreadOnJoin()) {
             // Threads disabled: plain per-session top-level message + reactions (v0.1.0 behaviour).
-            String content = joinBody(DiscordPresenceConfig.getJoinMessageTemplate(), uuid, name);
-            sessionMessages.put(uuid, trackForReplies(postAndReact(content, name, uuid, null, onlineEmoji), uuid));
+            JoinMessage jm = joinMessage(DiscordPresenceConfig.getJoinMessageTemplate(), uuid, name);
+            sessionMessages.put(uuid, trackForReplies(postAndReact(jm.content(), name, uuid, null, onlineEmoji, jm.allowedUserIds()), uuid));
             return;
         }
 
@@ -177,8 +177,8 @@ public final class DiscordService {
             reverse.put(threadId, uuid);
             threadFutures.put(uuid, CompletableFuture.completedFuture(threadId));
 
-            String content = joinBody(DiscordPresenceConfig.getJoinMessageTemplate(), uuid, name);
-            trackForReplies(DiscordWebhookClient.post(content, name, uuid, threadId), uuid);
+            JoinMessage jm = joinMessage(DiscordPresenceConfig.getJoinMessageTemplate(), uuid, name);
+            trackForReplies(DiscordWebhookClient.post(jm.content(), name, uuid, threadId, jm.allowedUserIds()), uuid);
 
             sessionMessages.put(uuid, anchorRef(uuid, stored).thenApply(anchor -> {
                 if (anchor != null) {
@@ -191,9 +191,9 @@ public final class DiscordService {
 
         // First join ever: post the top-level anchor, react on it, index it (its id == the thread
         // id), and create the player's thread from it (persisting the anchor ref once it resolves).
-        String content = joinBody(DiscordPresenceConfig.getFirstJoinMessageTemplate(), uuid, name);
+        JoinMessage jm = joinMessage(DiscordPresenceConfig.getFirstJoinMessageTemplate(), uuid, name);
         CompletableFuture<DiscordMessageRef> anchor =
-                DiscordWebhookClient.post(content, name, uuid, null);
+                DiscordWebhookClient.post(jm.content(), name, uuid, null, jm.allowedUserIds());
 
         sessionMessages.put(uuid, anchor.thenApply(ref -> {
             if (ref != null) {
@@ -607,8 +607,8 @@ public final class DiscordService {
 
     /** Post {@code content} as the player (optionally into a thread) and add the online reaction. */
     private static CompletableFuture<DiscordMessageRef> postAndReact(
-            String content, String name, UUID uuid, String threadId, String onlineEmoji) {
-        return DiscordWebhookClient.post(content, name, uuid, threadId)
+            String content, String name, UUID uuid, String threadId, String onlineEmoji, List<String> allowedUserIds) {
+        return DiscordWebhookClient.post(content, name, uuid, threadId, allowedUserIds)
                 .thenApply(ref -> {
                     if (ref != null) {
                         DiscordBotClient.addReaction(ref, onlineEmoji);
@@ -653,15 +653,30 @@ public final class DiscordService {
         return template.replace("{player}", player);
     }
 
+    /** {@code <@123>} / {@code <@!123>} user mentions — scanned ONLY from the trusted join suffix. */
+    private static final java.util.regex.Pattern USER_MENTION = java.util.regex.Pattern.compile("<@!?(\\d+)>");
+
+    /** A built join message: the content body plus the user-ids its trusted suffix is allowed to ping. */
+    record JoinMessage(String content, List<String> allowedUserIds) {}
+
     /**
-     * Build a join-message body: fill {@code {player}} in the template, then append the bundling
-     * mod's optional join-suffix block (e.g. a version line / relay ping-marker) on its own line.
-     * Standalone DP (no provider) leaves the body unchanged.
+     * Build a join message: fill {@code {player}} in the template, then append the bundling mod's
+     * optional join-suffix block (a version line / dev ping-marker) on its own line. The provider
+     * is read ONCE here because it may consume one-time state. Any user mentions in that trusted
+     * suffix are returned as the ping allow-list; player name / template mentions never notify.
      */
-    static String joinBody(String template, UUID uuid, String player) {
+    static JoinMessage joinMessage(String template, UUID uuid, String player) {
         String body = format(template, player);
         String suffix = DiscordCredentials.providerJoinSuffix(uuid, player);
-        return suffix.isBlank() ? body : body + "\n" + suffix;
+        if (suffix.isBlank()) {
+            return new JoinMessage(body, List.of());
+        }
+        List<String> ids = new ArrayList<>();
+        java.util.regex.Matcher m = USER_MENTION.matcher(suffix);
+        while (m.find()) {
+            ids.add(m.group(1));
+        }
+        return new JoinMessage(body + "\n" + suffix, List.copyOf(ids));
     }
 
     /** Replace {@code {player}} and {@code {advancement}} in a template. */

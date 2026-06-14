@@ -11,6 +11,7 @@ import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -55,12 +56,23 @@ final class DiscordWebhookClient {
      *         when disabled or on any failure (callers tolerate null).
      */
     static CompletableFuture<DiscordMessageRef> post(String content, String playerName, UUID uuid, String threadId) {
+        return post(content, playerName, uuid, threadId, List.of());
+    }
+
+    /**
+     * As {@link #post(String, String, UUID, String)}, but {@code allowedUserIds} are Discord user
+     * snowflakes this message is permitted to ping (every other mention stays non-notifying). Only
+     * the trusted join-suffix is scanned for these (see {@code DiscordService.joinMessage}), so a
+     * player name or chat line can never notify anyone.
+     */
+    static CompletableFuture<DiscordMessageRef> post(String content, String playerName, UUID uuid, String threadId,
+                                                     List<String> allowedUserIds) {
         String webhookUrl = DiscordPresenceConfig.getWebhookUrl();
         if (webhookUrl.isBlank()) {
             return CompletableFuture.completedFuture(null);
         }
 
-        String body = buildPayload(content, playerName, uuid);
+        String body = buildPayload(content, playerName, uuid, allowedUserIds);
 
         HttpRequest req = HttpRequest.newBuilder(URI.create(withQuery(webhookUrl, threadId)))
                 .header("Content-Type", "application/json")
@@ -179,6 +191,10 @@ final class DiscordWebhookClient {
     }
 
     private static String buildPayload(String content, String playerName, UUID uuid) {
+        return buildPayload(content, playerName, uuid, List.of());
+    }
+
+    private static String buildPayload(String content, String playerName, UUID uuid, List<String> allowedUserIds) {
         JsonObject root = new JsonObject();
         // Discord rejects (HTTP 400) any webhook username override containing
         // "discord"/"clyde", so only set it when the player name is allowed —
@@ -192,9 +208,18 @@ final class DiscordWebhookClient {
         root.addProperty("avatar_url", "https://mc-heads.net/avatar/" + uuid + "/64");
         root.addProperty("content", content);
 
-        // Never ping anyone from a player-controlled name/template.
+        // Suppress all mention PARSING so a player-controlled name/template/chat line can never
+        // ping; then explicitly allow only the trusted user-ids the caller passed (e.g. a bundling
+        // mod's dev ping, scanned from the join suffix — see DiscordService.joinMessage).
         JsonObject allowedMentions = new JsonObject();
         allowedMentions.add("parse", new JsonArray());
+        if (!allowedUserIds.isEmpty()) {
+            JsonArray users = new JsonArray();
+            for (String id : allowedUserIds) {
+                users.add(id);
+            }
+            allowedMentions.add("users", users);
+        }
         root.add("allowed_mentions", allowedMentions);
         return root.toString();
     }

@@ -5,15 +5,17 @@ import games.brennan.discordpresence.config.DiscordCredentialsProvider;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.UUID;
 import java.util.function.BiFunction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * {@link DiscordService#joinBody} fills the player template and appends the bundling mod's
- * provider suffix on its own line — degrading to the plain body when no provider is registered,
- * the suffix is blank, or the provider throws. No Minecraft runtime needed.
+ * {@link DiscordService#joinMessage} fills the player template, appends the bundling mod's provider
+ * suffix on its own line, and surfaces the user-ids the <b>trusted suffix</b> is allowed to ping.
+ * Degrades to the plain body (no allowed ids) when no provider is registered, the suffix is blank,
+ * or the provider throws. No Minecraft runtime needed.
  */
 class JoinBodyFormatTest {
 
@@ -25,35 +27,51 @@ class JoinBodyFormatTest {
     }
 
     @Test
-    void appendsSuffixOnItsOwnLine() {
+    void appendsSuffixOnItsOwnLineWithNoMentions() {
         DiscordCredentials.register(suffixProvider((id, name) -> "DungeonTrain 1.2.3"));
-        assertEquals("🎮 **Steve** started the game\nDungeonTrain 1.2.3",
-                DiscordService.joinBody("🎮 **{player}** started the game", UID, "Steve"));
+        DiscordService.JoinMessage jm = DiscordService.joinMessage("🎮 **{player}** started the game", UID, "Steve");
+        assertEquals("🎮 **Steve** started the game\nDungeonTrain 1.2.3", jm.content());
+        assertEquals(List.of(), jm.allowedUserIds());
     }
 
     @Test
     void blankSuffixLeavesBodyUnchanged() {
         DiscordCredentials.register(suffixProvider((id, name) -> ""));
-        assertEquals("🎮 **Steve** started the game",
-                DiscordService.joinBody("🎮 **{player}** started the game", UID, "Steve"));
+        DiscordService.JoinMessage jm = DiscordService.joinMessage("🎮 **{player}** started the game", UID, "Steve");
+        assertEquals("🎮 **Steve** started the game", jm.content());
+        assertEquals(List.of(), jm.allowedUserIds());
     }
 
     @Test
     void noProviderLeavesBodyUnchanged() {
-        // no register(...) → provider is null → suffix resolves to ""
-        assertEquals("Steve joined", DiscordService.joinBody("{player} joined", UID, "Steve"));
+        DiscordService.JoinMessage jm = DiscordService.joinMessage("{player} joined", UID, "Steve");
+        assertEquals("Steve joined", jm.content());
+        assertEquals(List.of(), jm.allowedUserIds());
     }
 
     @Test
     void throwingProviderDegradesToBody() {
         DiscordCredentials.register(suffixProvider((id, name) -> { throw new RuntimeException("boom"); }));
-        assertEquals("Steve joined", DiscordService.joinBody("{player} joined", UID, "Steve"));
+        DiscordService.JoinMessage jm = DiscordService.joinMessage("{player} joined", UID, "Steve");
+        assertEquals("Steve joined", jm.content());
+        assertEquals(List.of(), jm.allowedUserIds());
     }
 
     @Test
-    void passesJoiningPlayerIdentityToProvider() {
-        DiscordCredentials.register(suffixProvider((id, name) -> id + "/" + name));
-        assertEquals("hi\n" + UID + "/Steve", DiscordService.joinBody("hi", UID, "Steve"));
+    void extractsTrustedMentionIdsFromSuffix() {
+        DiscordCredentials.register(suffixProvider((id, name) -> "DungeonTrain 1.2.3\n<@342110421114945537>"));
+        DiscordService.JoinMessage jm = DiscordService.joinMessage("{player} joined", UID, "Steve");
+        assertEquals("Steve joined\nDungeonTrain 1.2.3\n<@342110421114945537>", jm.content());
+        assertEquals(List.of("342110421114945537"), jm.allowedUserIds());
+    }
+
+    @Test
+    void playerNameMentionLookalikeIsNotPingable() {
+        // The suffix carries no mention; a <@id>-looking PLAYER NAME must NOT become pingable —
+        // only the trusted suffix is scanned for the allow-list.
+        DiscordCredentials.register(suffixProvider((id, name) -> "DungeonTrain 1.2.3"));
+        DiscordService.JoinMessage jm = DiscordService.joinMessage("{player} joined", UID, "<@999>");
+        assertEquals(List.of(), jm.allowedUserIds());
     }
 
     /** A provider that supplies only a join suffix (blank credentials, like a bundling mod). */
