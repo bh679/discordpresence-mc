@@ -353,11 +353,52 @@ public final class DiscordService {
     // --- advancements ---
 
     /**
+     * Thread-local gate toggled by {@link #runWithAdvancementAnnounceSuppressed(Runnable)}.
+     * When set, {@link #onAdvancement} is a no-op. Thread-scoped because
+     * {@code AdvancementEarnEvent} fires synchronously on the server thread inside
+     * {@code PlayerAdvancements.award(...)} — the same thread a bundling mod runs its
+     * programmatic grants on — so the flag is visible to the handler and never bleeds
+     * into other players' grants on other threads.
+     */
+    private static final ThreadLocal<Boolean> SUPPRESS_ANNOUNCE =
+            ThreadLocal.withInitial(() -> Boolean.FALSE);
+
+    /**
+     * Run {@code body} with advancement announcements suppressed on the current
+     * thread: any {@link #onAdvancement} firing while {@code body} runs is skipped.
+     * The previous state is restored in a {@code finally}, so nesting and exceptions
+     * are safe.
+     *
+     * <p><b>Public API.</b> A bundling mod (e.g. Dungeon Train) wraps a batch of
+     * <i>programmatic</i> advancement grants it does not want mirrored to Discord —
+     * for example re-granting a player's cross-world advancements on login, which
+     * would otherwise re-fire {@code AdvancementEarnEvent} and double-post an
+     * advancement the player already earned. Genuine first-time earns are unaffected.</p>
+     */
+    public static void runWithAdvancementAnnounceSuppressed(Runnable body) {
+        boolean prev = SUPPRESS_ANNOUNCE.get();
+        SUPPRESS_ANNOUNCE.set(Boolean.TRUE);
+        try {
+            body.run();
+        } finally {
+            SUPPRESS_ANNOUNCE.set(prev);
+        }
+    }
+
+    /** Whether advancement announcements are currently suppressed on this thread. Package-private for tests. */
+    static boolean isAdvancementAnnounceSuppressed() {
+        return SUPPRESS_ANNOUNCE.get();
+    }
+
+    /**
      * Announce an earned advancement in the player's thread (when it passes the
      * namespace/display filter). Chains on the thread future, so an advancement
      * earned while the first-join thread is still being created still posts.
      */
     public void onAdvancement(ServerPlayer player, AdvancementHolder holder) {
+        if (SUPPRESS_ANNOUNCE.get()) {
+            return; // bundling mod is re-granting advancements (e.g. DT cross-world replay) — don't mirror to Discord
+        }
         if (!enabled() || !DiscordPresenceConfig.isCreateThreadOnJoin()) {
             return; // no thread to post into
         }
