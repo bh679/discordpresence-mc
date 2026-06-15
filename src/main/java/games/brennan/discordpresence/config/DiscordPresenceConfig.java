@@ -24,7 +24,7 @@ public final class DiscordPresenceConfig {
     public static final String DEFAULT_FIRST_JOIN_TEMPLATE = "🎮 **{player}** joined the game for the first time";
     public static final String DEFAULT_ONLINE_EMOJI = "🟢"; // 🟢
     public static final String DEFAULT_DEATH_EMOJI = "💀";  // 💀
-    public static final int DEFAULT_ONLINE_REACTION_REFRESH_MINUTES = 15;
+    public static final int DEFAULT_ONLINE_REACTION_REFRESH_MINUTES = 5;
     public static final String DEFAULT_THREAD_NAME_TEMPLATE = "{player}";
     public static final int DEFAULT_THREAD_AUTO_ARCHIVE_MINUTES = 10080; // 1 week
     public static final String DEFAULT_ADVANCEMENT_TEMPLATE = "{player} earned";
