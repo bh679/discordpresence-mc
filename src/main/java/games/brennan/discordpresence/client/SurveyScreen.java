@@ -71,7 +71,7 @@ public final class SurveyScreen extends Screen {
         if (question.allowComment()) {
             commentBox = new EditBox(this.font, left, y, CONTENT_WIDTH, 20, Component.literal("Comment"));
             commentBox.setMaxLength(256);
-            commentBox.setHint(Component.literal("Optional comment…"));
+            commentBox.setHint(Component.literal("What's the main reason for your score? (optional)"));
             addRenderableWidget(commentBox);
             y += 28;
         }
@@ -109,17 +109,18 @@ public final class SurveyScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        // Background blur/dim + widgets first; our text goes ON TOP. Drawing the prompt
+        // before super.render() let the background pass blur it — hence draw it after.
         this.renderBackground(graphics, mouseX, mouseY, partialTick);
+        super.render(graphics, mouseX, mouseY, partialTick);
 
-        // Wrapped question prompt, centered above the score row.
+        // Wrapped question prompt, centered above the score row (drawn last → crisp).
         List<FormattedCharSequence> lines = this.font.split(Component.literal(question.prompt()), CONTENT_WIDTH);
         int ly = promptTop();
         for (FormattedCharSequence line : lines) {
             graphics.drawCenteredString(this.font, line, this.width / 2, ly, 0xFFFFFF);
             ly += this.font.lineHeight + 2;
         }
-
-        super.render(graphics, mouseX, mouseY, partialTick);
 
         // Highlight the selected score with an accent outline (drawn over the buttons).
         if (selectedScore != NO_SCORE) {
