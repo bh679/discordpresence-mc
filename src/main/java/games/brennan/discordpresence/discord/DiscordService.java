@@ -707,6 +707,36 @@ public final class DiscordService {
     }
 
     /**
+     * Post a player's survey/feedback response as an embed into the player's Discord
+     * thread (the same thread as their join / death / advancement messages) when they
+     * have one, else top-level — under the player's name/avatar, no composed image.
+     * Best-effort; the HTTP runs off-thread via the webhook client.
+     *
+     * <p><b>Public API.</b> Driven by {@code SurveyManager} when a player submits a
+     * death-screen survey answer ({@code fields} = the rating, plus an optional
+     * comment field).</p>
+     */
+    public void postSurveyResponse(ServerPlayer player, String title, String description, List<DeathField> fields) {
+        if (!enabled() || !networkAllowed(player.server)) {
+            return;
+        }
+        UUID uuid = player.getUUID();
+        String name = player.getGameProfile().getName();
+        JsonObject embed = buildReportEmbed(title, description, fields, DiscordPresenceConfig.getSurveyEmbedColor());
+        String threadId = threadStore.threadId(uuid); // into the player's thread when they have one (null → top-level)
+        DiscordWebhookClient.postReport(name, uuid, threadId, embed, null, null)
+                .thenAccept(ref -> {
+                    if (ref != null) {
+                        reverse.put(ref.messageId(), uuid);
+                    }
+                })
+                .exceptionally(t -> {
+                    LOGGER.warn("Survey response post failed: {}", t.toString());
+                    return null;
+                });
+    }
+
+    /**
      * Shared report core behind {@link #postDeathReport}, {@link #postDisconnectReport}, and the auto
      * disconnect report ({@link #onPlayerLeave}). Builds the coloured embed, snapshots the gear icons
      * on the calling (server) thread — so later inventory mutation / clearing can't affect the image —
