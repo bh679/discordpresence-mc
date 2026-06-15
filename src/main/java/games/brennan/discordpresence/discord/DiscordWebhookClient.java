@@ -48,6 +48,17 @@ final class DiscordWebhookClient {
     }
 
     /**
+     * As {@link #postChat(String, UUID, String, String)}, but {@code allowedUserIds} are the Discord
+     * users this relayed line may ping — the ids of configured {@code gameRelayMentions} triggers the
+     * line contains (e.g. {@code @dev}), already rewritten to {@code <@id>} in {@code content}. Every
+     * other mention stays non-notifying.
+     */
+    static CompletableFuture<DiscordMessageRef> postChat(String playerName, UUID uuid, String content,
+                                                         String threadId, List<String> allowedUserIds) {
+        return post(content, playerName, uuid, threadId, allowedUserIds);
+    }
+
+    /**
      * Post {@code content} as the given player. When {@code threadId} is non-null the
      * message lands inside that thread; otherwise it posts top-level. Uses
      * {@code ?wait=true} so Discord returns the created message's id + channel_id.
@@ -62,8 +73,8 @@ final class DiscordWebhookClient {
     /**
      * As {@link #post(String, String, UUID, String)}, but {@code allowedUserIds} are Discord user
      * snowflakes this message is permitted to ping (every other mention stays non-notifying). Only
-     * the trusted join-suffix is scanned for these (see {@code DiscordService.joinMessage}), so a
-     * player name or chat line can never notify anyone.
+     * trusted sources populate these — the join-suffix (see {@code DiscordService.joinMessage}) and
+     * configured chat-tag triggers ({@code gameRelayMentions}) — so arbitrary player text never pings.
      */
     static CompletableFuture<DiscordMessageRef> post(String content, String playerName, UUID uuid, String threadId,
                                                      List<String> allowedUserIds) {

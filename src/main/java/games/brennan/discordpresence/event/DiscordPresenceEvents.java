@@ -2,6 +2,7 @@ package games.brennan.discordpresence.event;
 
 import games.brennan.discordpresence.DiscordPresence;
 import games.brennan.discordpresence.discord.DiscordService;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -55,7 +56,13 @@ public final class DiscordPresenceEvents {
     @SubscribeEvent
     public static void onServerChat(ServerChatEvent event) {
         // Observe only — never cancel; relay the raw line to Discord.
-        DiscordService.get().onGameChat(event.getPlayer(), event.getRawText());
+        DiscordService service = DiscordService.get();
+        service.onGameChat(event.getPlayer(), event.getRawText());
+        // Highlight configured @tags yellow in the broadcast message everyone sees (best-effort).
+        Component highlighted = service.colorizeChatTags(event.getRawText());
+        if (highlighted != null) {
+            event.setMessage(highlighted);
+        }
     }
 
     @SubscribeEvent

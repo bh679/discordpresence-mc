@@ -24,3 +24,7 @@ displayURL="https://github.com/bh679/discordpresence-mc"
     versionRange="${minecraft_version_range}"
     ordering="NONE"
     side="BOTH"
+
+# Client-only mixin: adds @dev-style chat-tag tokens to the chat-box autocomplete.
+[[mixins]]
+config="discordpresence.mixins.json"

@@ -41,6 +41,9 @@ final class AutoResponder {
     /** Delay before the whisper shows, so it lands AFTER the player's own chat line. */
     private static final long WHISPER_DELAY_MILLIS = 300L;
 
+    /** Delay before the "tag the dev" hint shows, so it lands AFTER the whisper. */
+    private static final long MENTION_HINT_DELAY_MILLIS = 1500L;
+
     private final AutoResponseStore store = new AutoResponseStore();
 
     /** Per-player epoch-millis of the last whisper shown — the cooldown gate (transient). */
@@ -66,6 +69,17 @@ final class AutoResponder {
         store.put(uuid, System.currentTimeMillis());
     }
 
+    /**
+     * Whether Discord is in an active conversation with this player: a relayed Discord message landed
+     * within the same window that disarms whispers ({@code rearmMinutes}). Reused by the engaged-only
+     * chat-relay gate, so the moment Discord engages a player both the whisper stops and their chat
+     * begins relaying. Independent of {@code autoResponse.enabled} — the disarm store is always kept.
+     */
+    boolean hasActiveDiscordConversation(UUID uuid) {
+        return !isArmed(store.get(uuid), System.currentTimeMillis(),
+                DiscordPresenceConfig.getAutoResponseRearmMinutes());
+    }
+
     /** Drop transient per-player cooldowns on server stop (the disarm store stays on disk). */
     void clear() {
         lastWhisper.clear();
@@ -73,10 +87,12 @@ final class AutoResponder {
 
     /**
      * On an in-game chat line, broadcast a flavour auto-response when the player is
-     * armed and off cooldown. Server-thread only (called from
+     * armed and off cooldown. When {@code suggestMention} is set — the engaged-only
+     * relay gate would otherwise swallow this line — a second "tag the dev" hint
+     * follows the whisper. Server-thread only (called from
      * {@link DiscordService#onGameChat}).
      */
-    void onPlayerChat(ServerPlayer player) {
+    void onPlayerChat(ServerPlayer player, boolean suggestMention) {
         if (!DiscordPresenceConfig.isAutoResponseEnabled()) {
             return;
         }
@@ -106,10 +122,22 @@ final class AutoResponder {
             return; // this mode's message pool is empty
         }
         lastWhisper.put(uuid, now);
-        // Grey, like a system message. Delayed ~1s and hopped back onto the server thread so it
-        // lands AFTER the player's own chat line — the modern chat broadcast is asynchronous, so
-        // an immediate server-thread enqueue still raced ahead of it. A system message never
-        // re-fires ServerChatEvent, so there is no relay loop.
+        // Grey, like a system message. Delayed so it lands AFTER the player's own chat line — the modern
+        // chat broadcast is asynchronous, so an immediate server-thread enqueue still raced ahead of it.
+        // A system message never re-fires ServerChatEvent, so there is no relay loop.
+        scheduleGrayBroadcast(server, line, WHISPER_DELAY_MILLIS);
+
+        // Second line: nudge the player to tag the dev so they can actually be heard.
+        if (suggestMention) {
+            String hint = pickMentionHint(name);
+            if (hint != null && !hint.isBlank()) {
+                scheduleGrayBroadcast(server, hint, MENTION_HINT_DELAY_MILLIS);
+            }
+        }
+    }
+
+    /** Schedule a grey system broadcast after {@code delayMillis}, hopped onto the server thread; never throws. */
+    private void scheduleGrayBroadcast(MinecraftServer server, String line, long delayMillis) {
         Component message = Component.literal(line).withStyle(ChatFormatting.GRAY);
         scheduler.schedule(() -> {
             try {
@@ -117,7 +145,7 @@ final class AutoResponder {
             } catch (Exception ignored) {
                 // server stopped during the delay, etc. — best-effort flavour, never throw.
             }
-        }, WHISPER_DELAY_MILLIS, TimeUnit.MILLISECONDS);
+        }, delayMillis, TimeUnit.MILLISECONDS);
     }
 
     /** Assemble the alone whisper from the configured template + a random verb/place/phrase. */
@@ -142,6 +170,15 @@ final class AutoResponder {
             return null;
         }
         return pickAndFormat(msgs, player, ThreadLocalRandom.current().nextInt(msgs.size()));
+    }
+
+    /** Pick a random "tag the dev" hint line, or null when the pool is empty. */
+    private static String pickMentionHint(String player) {
+        List<? extends String> hints = DiscordPresenceConfig.getAutoResponseMentionHintMessages();
+        if (hints.isEmpty()) {
+            return null;
+        }
+        return pickAndFormat(hints, player, ThreadLocalRandom.current().nextInt(hints.size()));
     }
 
     // --- pure helpers (unit-tested) ---------------------------------------

@@ -3,6 +3,8 @@ package games.brennan.discordpresence.config;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -83,5 +85,34 @@ class DiscordPresenceConfigSeamTest {
             @Override public boolean suppressAutoDeathReport() { return true; }
         });
         assertFalse(DiscordPresenceConfig.isAutoDeathReport());
+    }
+
+    @Test
+    void providerCanRequireEngagementForGameRelay() {
+        // No provider → engaged-only gate follows config (default off; DT registers no override).
+        DiscordCredentials.register(null);
+        assertFalse(DiscordPresenceConfig.isRelayGameToDiscordEngagedOnly());
+        // A bundling mod could force the gate on (not done by DT at this stage).
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public boolean requireEngagementForGameRelay() { return true; }
+        });
+        assertTrue(DiscordPresenceConfig.isRelayGameToDiscordEngagedOnly());
+    }
+
+    @Test
+    void providerSuppliesGameRelayMentions() {
+        // No provider + config unloaded → no triggers.
+        DiscordCredentials.register(null);
+        assertTrue(DiscordPresenceConfig.getGameRelayMentions().isEmpty());
+        // A bundling mod could supply the trigger list (not done by DT at this stage).
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public List<String> gameRelayMentions() {
+                return List.of("@dev=<@342110421114945537>", "@brennanhatton=<@342110421114945537>");
+            }
+        });
+        assertEquals(List.of("@dev=<@342110421114945537>", "@brennanhatton=<@342110421114945537>"),
+                DiscordPresenceConfig.getGameRelayMentions());
     }
 }
