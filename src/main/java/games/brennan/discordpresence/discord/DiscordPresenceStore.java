@@ -91,6 +91,22 @@ final class DiscordPresenceStore {
         save();
     }
 
+    /**
+     * Relay-mode: store the relay's <i>authoritative</i> presence for a user — its current
+     * {@code status} plus the {@code lastOnlineMillis} the relay already computed (the freeze point).
+     * Unlike {@link #record}, this does not derive the timestamp from "now": in relay-mode the relay
+     * tracks the live gateway and is the source of truth, so its value is stored verbatim (clamped
+     * non-negative; blank/null status reads as offline). Writes through (best-effort).
+     */
+    void setRelay(String userId, String status, long lastOnlineMillis) {
+        if (userId == null || userId.isBlank()) {
+            return;
+        }
+        String resolvedStatus = (status == null || status.isBlank()) ? PresenceUpdate.OFFLINE : status;
+        presence.put(userId, new Entry(resolvedStatus, Math.max(0L, lastOnlineMillis)));
+        save();
+    }
+
     /** The epoch-millis the user was last seen online, or empty when never observed online. */
     Optional<Long> lastOnlineMillis(String userId) {
         if (userId == null) {

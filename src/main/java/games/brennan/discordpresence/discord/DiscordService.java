@@ -111,6 +111,9 @@ public final class DiscordService {
     /** The recurring online-reaction refresh/reconcile task, cancelled on server stop. */
     private volatile ScheduledFuture<?> presenceTask;
 
+    /** Relay-mode presence poller (feeds the last-seen-online seam); null in direct-bot mode. */
+    private volatile RelayPresencePoller relayPresencePoller;
+
     private DiscordService() {}
 
     /** Off entirely when no webhook URL is configured. */
@@ -167,13 +170,16 @@ public final class DiscordService {
         }
         GatewayConnection gw;
         if (DiscordPresenceConfig.isRelayMode()) {
-            // Relay-mode: the relay owns the Discord protocol and forwards chat, but not (yet) presence,
-            // so presence tracking has no local gateway to attach to here — it is served by the relay
-            // (Phase 2). Start the relay gateway only when inbound chat relay is on, as before.
+            // Relay-mode: the relay owns the Discord protocol. Presence is served by the relay's
+            // GET /presence/<id> endpoint — poll it to feed the query seam; inbound chat is pushed
+            // over the relay gateway. Presence polling is independent of inbound chat.
+            if (wantPresence) {
+                relayPresencePoller = new RelayPresencePoller(DiscordPresenceConfig.getRelayBaseUrl(),
+                        DiscordPresenceConfig.getPresenceTrackUserIds(), discordPresenceStore);
+                relayPresencePoller.start();
+            }
             if (!wantInbound) {
-                LOGGER.info("Discord Presence: presenceTrackUserIds is set but relay-mode has no local gateway; "
-                        + "presence must be served by the relay — none started.");
-                return;
+                return; // presence-only: no inbound-chat gateway needed
             }
             LOGGER.info("Discord Presence: starting relay gateway…");
             gw = new RelayGateway(DiscordPresenceConfig.getRelayGatewayUrl(), this::onDiscordMessage);
@@ -730,6 +736,11 @@ public final class DiscordService {
         presenceTask = null;
         if (pt != null) {
             pt.cancel(false); // stop the heartbeat; the presence store stays for startup crash-recovery
+        }
+        RelayPresencePoller rpp = relayPresencePoller;
+        relayPresencePoller = null;
+        if (rpp != null) {
+            rpp.stop();
         }
         GatewayConnection gw = gateway;
         gateway = null;
