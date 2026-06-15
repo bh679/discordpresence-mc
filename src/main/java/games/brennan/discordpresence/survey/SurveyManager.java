@@ -17,11 +17,13 @@ import java.util.function.Predicate;
 
 /**
  * Server-side driver for the death-screen feedback survey: tracks which questions a
- * player has answered, offers the next unanswered one on each death, and posts a
- * submitted answer to Discord.
+ * player has answered, sends their remaining (unanswered) questions on each death, and
+ * posts a submitted answer to Discord.
  *
- * <p>Exactly one question is surfaced per death — the offer is pushed on death and
- * cleared on submit (see {@link #onPlayerDeath} / {@link #record}).</p>
+ * <p>The client walks the sent questions one screen at a time, submitting each (every
+ * submit posts to Discord), so the player works through all their unanswered questions
+ * in one sitting. An answered question is never re-sent, and the death-screen button is
+ * hidden once a player has answered everything.</p>
  */
 public final class SurveyManager {
 
@@ -42,16 +44,13 @@ public final class SurveyManager {
         store.load(FMLPaths.CONFIGDIR.get().resolve(STORE_FILE));
     }
 
-    /** On death, offer the player their next unanswered question (or clear the button). */
+    /** On death, send the player their unanswered questions (an empty list hides the button). */
     public void onPlayerDeath(ServerPlayer player) {
-        SurveyQuestion next = active(player) ? nextFor(player.getUUID()) : null;
-        DPNetwork.sendTo(player, next == null
-                ? SurveyQuestionPayload.NONE
-                : new SurveyQuestionPayload(true, next.id(), next.prompt(),
-                        next.scaleMin(), next.scaleMax(), next.allowComment()));
+        List<SurveyQuestionPayload.Entry> entries = active(player) ? unansweredEntries(player.getUUID()) : List.of();
+        DPNetwork.sendTo(player, new SurveyQuestionPayload(entries));
     }
 
-    /** Handle a submitted answer: validate, persist, post to Discord, then clear the button. */
+    /** Handle a submitted answer: validate, persist, and post it to Discord. */
     public void record(ServerPlayer player, String questionId, int score, String comment) {
         SurveyQuestion question = SurveyRegistry.byId(questionId);
         if (question == null) {
@@ -75,30 +74,32 @@ public final class SurveyManager {
             fields.add(new DeathField("Comment", cleaned));
         }
         DiscordService.get().postSurveyResponse(player, "📋 Feedback — " + name, question.prompt(), fields);
-
-        // Clear the death-screen button now that this question is answered (one per death).
-        DPNetwork.sendTo(player, SurveyQuestionPayload.NONE);
     }
 
-    /** The first registered question this player has not answered, or {@code null} if none remain. */
-    private SurveyQuestion nextFor(UUID uuid) {
-        return firstUnanswered(SurveyRegistry.questions(), id -> store.hasAnswered(uuid, id));
+    /** The player's unanswered questions as client payload entries, in ask-order. */
+    private List<SurveyQuestionPayload.Entry> unansweredEntries(UUID uuid) {
+        List<SurveyQuestionPayload.Entry> out = new ArrayList<>();
+        for (SurveyQuestion q : unanswered(SurveyRegistry.questions(), id -> store.hasAnswered(uuid, id))) {
+            out.add(new SurveyQuestionPayload.Entry(q.id(), q.prompt(), q.scaleMin(), q.scaleMax(), q.allowComment()));
+        }
+        return out;
     }
 
-    /** Pure selection logic (testable): the first bank question for which {@code answered} is false. */
-    static SurveyQuestion firstUnanswered(List<SurveyQuestion> bank, Predicate<String> answered) {
+    /** Pure selection (testable): the bank questions for which {@code answered} is false, in order. */
+    static List<SurveyQuestion> unanswered(List<SurveyQuestion> bank, Predicate<String> answered) {
+        List<SurveyQuestion> out = new ArrayList<>();
         for (SurveyQuestion q : bank) {
             if (!answered.test(q.id())) {
-                return q;
+                out.add(q);
             }
         }
-        return null;
+        return out;
     }
 
     /**
-     * Whether the survey may run for this player right now: enabled in config, a
-     * Discord webhook configured (so responses can post), and network use allowed
-     * (always on a dedicated server; requires the one-time consent in singleplayer).
+     * Whether the survey may run for this player right now: enabled in config, a Discord
+     * webhook configured (so responses can post), and network use allowed (always on a
+     * dedicated server; requires the one-time consent in singleplayer).
      */
     private static boolean active(ServerPlayer player) {
         if (!DiscordPresenceConfig.isSurveyEnabled()) {

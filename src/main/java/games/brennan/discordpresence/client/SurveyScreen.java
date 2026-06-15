@@ -13,10 +13,11 @@ import net.minecraft.util.FormattedCharSequence;
 import java.util.List;
 
 /**
- * The feedback survey window: one question (a 0–N rating row + an optional comment),
- * opened from the death-screen Feedback button. Submitting sends the answer to the
- * server (which posts it to Discord) and returns to the death screen; skipping just
- * returns — the question is offered again on the next death.
+ * The feedback survey window: walks the player's unanswered questions one screen at a
+ * time. Each question is a 0–N rating + an optional comment; Submit sends the answer to
+ * the server (which posts it to Discord) and advances to the next question; Skip advances
+ * without recording (re-offered next death). After the last question the screen closes
+ * back to the death screen.
  */
 public final class SurveyScreen extends Screen {
 
@@ -27,36 +28,42 @@ public final class SurveyScreen extends Screen {
     private static final int NO_SCORE = Integer.MIN_VALUE;
 
     private final Screen parent;
-    private final SurveyQuestionPayload question;
-    private final Button[] scoreButtons;
+    private final List<SurveyQuestionPayload.Entry> questions;
 
+    private int index = 0;
     private int selectedScore = NO_SCORE;
+    private Button[] scoreButtons = new Button[0];
     private EditBox commentBox;
     private Button submitButton;
 
-    public SurveyScreen(Screen parent, SurveyQuestionPayload question) {
+    public SurveyScreen(Screen parent, List<SurveyQuestionPayload.Entry> questions) {
         super(Component.literal("Feedback")); // narration title
         this.parent = parent;
-        this.question = question;
-        this.scoreButtons = new Button[Math.max(1, question.scaleMax() - question.scaleMin() + 1)];
+        this.questions = List.copyOf(questions);
+    }
+
+    private SurveyQuestionPayload.Entry current() {
+        return questions.get(index);
     }
 
     @Override
     protected void init() {
+        SurveyQuestionPayload.Entry q = current();
         int centerX = this.width / 2;
         int left = centerX - CONTENT_WIDTH / 2;
 
-        int promptLines = this.font.split(Component.literal(question.prompt()), CONTENT_WIDTH).size();
+        int promptLines = this.font.split(Component.literal(q.prompt()), CONTENT_WIDTH).size();
         int promptBottom = promptTop() + promptLines * (this.font.lineHeight + 2);
 
         // 0–N score buttons in a single centered row.
-        int count = scoreButtons.length;
+        int count = Math.max(1, q.scaleMax() - q.scaleMin() + 1);
+        scoreButtons = new Button[count];
         int cellW = (CONTENT_WIDTH - (count - 1) * SCORE_GAP) / count;
         int rowW = count * cellW + (count - 1) * SCORE_GAP;
         int rowX = centerX - rowW / 2;
         int scoreY = promptBottom + 12;
         for (int i = 0; i < count; i++) {
-            int value = question.scaleMin() + i;
+            int value = q.scaleMin() + i;
             int x = rowX + i * (cellW + SCORE_GAP);
             Button b = Button.builder(Component.literal(Integer.toString(value)), btn -> selectScore(value))
                     .bounds(x, scoreY, cellW, SCORE_H)
@@ -67,29 +74,32 @@ public final class SurveyScreen extends Screen {
 
         int y = scoreY + SCORE_H + 10;
 
-        // Optional comment box.
-        if (question.allowComment()) {
+        // Optional comment box (fresh per question).
+        if (q.allowComment()) {
             commentBox = new EditBox(this.font, left, y, CONTENT_WIDTH, 20, Component.literal("Comment"));
             commentBox.setMaxLength(256);
             commentBox.setHint(Component.literal("What's the main reason for your score? (optional)"));
             addRenderableWidget(commentBox);
             y += 28;
+        } else {
+            commentBox = null;
         }
 
-        // Submit + Skip.
+        // Submit (+ advance) + Skip.
         int btnW = (CONTENT_WIDTH - 8) / 2;
-        submitButton = Button.builder(Component.literal("Submit"), b -> submit())
+        boolean last = index == questions.size() - 1;
+        submitButton = Button.builder(Component.literal(last ? "Submit" : "Submit & next"), b -> submit())
                 .bounds(left, y, btnW, 20)
                 .build();
         submitButton.active = false;
         addRenderableWidget(submitButton);
-        addRenderableWidget(Button.builder(Component.literal("Skip"), b -> onClose())
+        addRenderableWidget(Button.builder(Component.literal("Skip"), b -> skip())
                 .bounds(left + btnW + 8, y, btnW, 20)
                 .build());
     }
 
     private int promptTop() {
-        return Math.max(30, this.height / 2 - 70);
+        return Math.max(36, this.height / 2 - 70);
     }
 
     private void selectScore(int value) {
@@ -101,21 +111,44 @@ public final class SurveyScreen extends Screen {
         if (selectedScore == NO_SCORE) {
             return;
         }
+        SurveyQuestionPayload.Entry q = current();
         String comment = commentBox == null ? "" : commentBox.getValue().trim();
-        DPNetwork.sendToServer(new SurveySubmitPayload(question.questionId(), selectedScore, comment));
-        SurveyClientState.clear(); // hide the button immediately; the server confirms with a clear too
-        onClose();
+        DPNetwork.sendToServer(new SurveySubmitPayload(q.id(), selectedScore, comment));
+        advance();
+    }
+
+    private void skip() {
+        advance();
+    }
+
+    /** Move to the next question (resetting per-question state), or finish and close. */
+    private void advance() {
+        index++;
+        selectedScore = NO_SCORE;
+        if (index < questions.size()) {
+            this.rebuildWidgets(); // re-run init() for the next question
+        } else {
+            SurveyClientState.clear(); // walked them all — hide the button
+            onClose();
+        }
     }
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        // Background blur/dim + widgets first; our text goes ON TOP. Drawing the prompt
-        // before super.render() let the background pass blur it — hence draw it after.
+        // Background blur/dim + widgets first; our text goes on top (drawing before
+        // super.render() lets the background pass blur it).
         this.renderBackground(graphics, mouseX, mouseY, partialTick);
         super.render(graphics, mouseX, mouseY, partialTick);
 
+        // Progress indicator when there's more than one question to walk.
+        if (questions.size() > 1) {
+            graphics.drawCenteredString(this.font,
+                    Component.literal("Question " + (index + 1) + " of " + questions.size()),
+                    this.width / 2, promptTop() - 14, 0xA0A0A0);
+        }
+
         // Wrapped question prompt, centered above the score row (drawn last → crisp).
-        List<FormattedCharSequence> lines = this.font.split(Component.literal(question.prompt()), CONTENT_WIDTH);
+        List<FormattedCharSequence> lines = this.font.split(Component.literal(current().prompt()), CONTENT_WIDTH);
         int ly = promptTop();
         for (FormattedCharSequence line : lines) {
             graphics.drawCenteredString(this.font, line, this.width / 2, ly, 0xFFFFFF);
@@ -124,7 +157,7 @@ public final class SurveyScreen extends Screen {
 
         // Highlight the selected score with an accent outline (drawn over the buttons).
         if (selectedScore != NO_SCORE) {
-            int idx = selectedScore - question.scaleMin();
+            int idx = selectedScore - current().scaleMin();
             if (idx >= 0 && idx < scoreButtons.length) {
                 Button b = scoreButtons[idx];
                 int x1 = b.getX() - 1;
