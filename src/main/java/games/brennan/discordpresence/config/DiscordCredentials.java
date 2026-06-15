@@ -120,6 +120,23 @@ public final class DiscordCredentials {
         }
     }
 
+    /** The provider's presence-track user ids, or an empty list when none is registered / it fails. */
+    public static List<String> providerPresenceTrackUserIds() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return List.of();
+        }
+        try {
+            List<String> value = current.presenceTrackUserIds();
+            return value == null ? List.of() : value;
+        } catch (Throwable t) {
+            if (WARNED.compareAndSet(false, true)) {
+                LOGGER.warn("DiscordCredentialsProvider threw; ignoring its value (this warning is logged once).", t);
+            }
+            return List.of();
+        }
+    }
+
     /** Snapshot the volatile slot and read one field, mapping null / any throwable to {@code ""}. */
     private static String read(Function<DiscordCredentialsProvider, String> field) {
         DiscordCredentialsProvider current = provider;

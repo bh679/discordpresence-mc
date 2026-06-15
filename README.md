@@ -17,6 +17,9 @@ joins, then keeps it live with reactions:
   the game shows a random grey flavour line (e.g. *"Steve whispers into the void, is anyone
   there?"*) — purely in-game, nudging Discord to reply. It turns off once a Discord reply lands
   and re-arms after a quiet spell.
+- 🕓 **Last seen online** *(for bundling mods)* — track configured Discord users' presence and expose
+  a `lastSeenOnline(userId)` / `isDiscordUserOnline(userId)` query, so a mod can render e.g. *"Brennan
+  was last seen online 5 minutes ago"*. Needs the bot token + the **Presence** privileged intent.
 
 It hooks only vanilla player events, so it works on any NeoForge server — and in singleplayer.
 It's also bundled into [Dungeon Train](https://github.com/bh679/dungeon-train-mc).
@@ -83,6 +86,7 @@ chatter is ignored, and the bot's/webhook's own messages are never echoed back.
 | `relayDiscordToGame` | `true` | Relay Discord replies/threads into in-game chat (needs the bot token + Message Content intent). |
 | `relayGameToDiscord` | `true` | Relay in-game chat to Discord through the webhook. |
 | `discordToGameFormat` | `<{user}> {msg}` | How a relayed Discord message reads in-game. `{user}` = author, `{msg}` = text. |
+| `presenceTrackUserIds` | `[]` | Discord user ids to track for the "last seen online" query API (`DiscordService.lastSeenOnline`). Non-empty needs the bot token + the **Presence** privileged intent; empty (default) requests no presence intent, so existing chat is unaffected. |
 
 > `discordpresence-server.toml` holds secrets and is **server-side only** (never sent to
 > clients). Don't commit it. A separate `discordpresence-client.toml` stores only your one-time
@@ -139,6 +143,28 @@ call `DiscordService.get().postDeathReport(player, title, description, fields, i
 death *or* logout handler, and have your `DiscordCredentialsProvider` return `suppressAutoDeathReport()`
 / `suppressAutoDisconnectReport()` so DP's built-in auto reports don't double-post. This is how
 Dungeon Train turns the disconnect report on (with its own stats) while standalone DP leaves it off.
+
+**Querying a Discord user's "last seen online".** DP can track configured Discord users' presence and
+expose it so a bundling mod can render *"Brennan was last seen online 5 minutes ago"*:
+
+```java
+// 1. Tell DP which Discord user ids to track (unioned with the admin's presenceTrackUserIds config):
+DiscordCredentials.register(new DiscordCredentialsProvider() {
+    @Override public String webhookUrl() { return "https://your-relay.example/hook"; }
+    @Override public List<String> presenceTrackUserIds() { return List.of("342110421114945537"); }
+});
+
+// 2. Query it anywhere — absent-safe: Optional.empty() whenever presence is unknown.
+Optional<Boolean> online = DiscordService.get().isDiscordUserOnline("342110421114945537");
+Optional<Instant> seen   = DiscordService.get().lastSeenOnline("342110421114945537");
+```
+
+This needs DP running a **direct bot connection** (a `botToken` set) with the **Presence Intent**
+enabled in the Developer Portal (Bot → Privileged Gateway Intents) — exactly like Message Content for
+two-way chat. Enabling it requests the `GUILD_PRESENCES` intent *only* when `presenceTrackUserIds` is
+non-empty, so installs that don't use it are unaffected. In **relay-mode** (the recommended secret-free
+setup) DP holds no local gateway, so the query returns empty unless the relay serves presence — both
+methods are absent-safe, so a consumer degrades gracefully meanwhile.
 
 ## Build
 
