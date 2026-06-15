@@ -58,6 +58,15 @@ public interface DiscordCredentialsProvider {
     }
 
     /**
+     * Whether DP should suppress its own generic auto-disconnect-report (the {@code autoDisconnectReport}
+     * config) because the bundling mod posts its own richer logout report via {@code DiscordService}'s
+     * {@code postDeathReport(...)}. Default false (DP's auto report fires as configured).
+     */
+    default boolean suppressAutoDisconnectReport() {
+        return false;
+    }
+
+    /**
      * Optional extra block appended below each join / first-join message — e.g. a bundling mod's
      * {@code "DungeonTrain 0.298.0"} line, optionally plus a relay ping-marker for a specific
      * player. Called on the server thread during join handling. {@code ""}/{@code null} = nothing
