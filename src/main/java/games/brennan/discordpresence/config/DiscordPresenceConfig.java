@@ -2,6 +2,7 @@ package games.brennan.discordpresence.config;
 
 import net.neoforged.neoforge.common.ModConfigSpec;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -47,6 +48,7 @@ public final class DiscordPresenceConfig {
 
     public static final boolean DEFAULT_RELAY_DISCORD_TO_GAME = true;
     public static final boolean DEFAULT_RELAY_GAME_TO_DISCORD = true;
+    public static final boolean DEFAULT_RELAY_GAME_TO_DISCORD_ENGAGED_ONLY = false;
     public static final String DEFAULT_DISCORD_TO_GAME_FORMAT = "<{user}> {msg}";
 
     public static final boolean DEFAULT_AUTO_RESPONSE_ENABLED = true;
@@ -68,6 +70,29 @@ public final class DiscordPresenceConfig {
             "perhaps a friend lurks nearby...");
     public static final List<String> DEFAULT_AUTO_RESPONSE_GROUP_MESSAGES =
             List.of("{player} mutters to themselves...");
+    public static final List<String> DEFAULT_MENTION_HINT_MESSAGES = List.of(
+            "perhaps if {player} tagged @dev it might land",
+            "perhaps if {player} tagged @dev they might be heard",
+            "perhaps if {player} tagged @dev, someone might finally stir",
+            "perhaps if {player} tagged @dev, the words might find their way",
+            "perhaps if {player} tagged @dev, an answer might come",
+            "perhaps if {player} tagged @dev, the silence might break",
+            "perhaps if {player} tagged @dev, a reply might echo back",
+            "perhaps if {player} tagged @dev, the void might listen",
+            "perhaps if {player} tagged @dev, the message might reach beyond",
+            "perhaps if {player} tagged @dev, an ear might turn their way",
+            "perhaps if {player} tagged @dev, they might not whisper alone",
+            "perhaps if {player} tagged @dev, the dark might whisper back",
+            "perhaps if {player} tagged @dev, someone beyond might notice",
+            "perhaps if {player} tagged @dev, a door might creak open",
+            "perhaps if {player} tagged @dev, the call might carry further",
+            "perhaps if {player} tagged @dev, a light might flicker on",
+            "perhaps if {player} tagged @dev, the world might lean in to listen",
+            "perhaps if {player} tagged @dev, their voice might pierce the quiet",
+            "perhaps if {player} tagged @dev, help might be on the way",
+            "perhaps if {player} tagged @dev, someone might hear at last",
+            "perhaps if {player} tagged @dev, the heavens might answer",
+            "perhaps if {player} tagged @dev, the message might land after all");
 
     public static final ModConfigSpec SPEC;
     public static final ModConfigSpec.ConfigValue<String> WEBHOOK_URL;
@@ -80,6 +105,8 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.IntValue ONLINE_REACTION_REFRESH_MINUTES;
     public static final ModConfigSpec.BooleanValue RELAY_DISCORD_TO_GAME;
     public static final ModConfigSpec.BooleanValue RELAY_GAME_TO_DISCORD;
+    public static final ModConfigSpec.BooleanValue RELAY_GAME_TO_DISCORD_ENGAGED_ONLY;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> GAME_RELAY_MENTIONS;
     public static final ModConfigSpec.ConfigValue<String> DISCORD_TO_GAME_FORMAT;
     public static final ModConfigSpec.BooleanValue CREATE_THREAD_ON_JOIN;
     public static final ModConfigSpec.ConfigValue<String> THREAD_NAME_TEMPLATE;
@@ -96,6 +123,7 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_RESPONSE_PHRASES;
     public static final ModConfigSpec.IntValue AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS;
     public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_RESPONSE_GROUP_MESSAGES;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> MENTION_HINT_MESSAGES;
     public static final ModConfigSpec.BooleanValue SHOW_ADVANCEMENT_ICON;
     public static final ModConfigSpec.ConfigValue<String> ADVANCEMENT_ICON_URL_TEMPLATE;
     public static final ModConfigSpec.BooleanValue SHOW_ADVANCEMENT_REQUIREMENTS;
@@ -169,6 +197,22 @@ public final class DiscordPresenceConfig {
                 .comment("Relay in-game chat to Discord through the webhook, posted under each player's name",
                          "(into their thread when they have one).")
                 .define("relayGameToDiscord", DEFAULT_RELAY_GAME_TO_DISCORD);
+        RELAY_GAME_TO_DISCORD_ENGAGED_ONLY = b
+                .comment("Gate game->Discord chat relay. When true a player's chat is relayed ONLY when Discord",
+                         "is actively conversing with them (a reply / thread message within autoResponse.rearmMinutes)",
+                         "OR the line contains a gameRelayMentions trigger. Off by default (all chat relays); a",
+                         "bundling mod can force it on. Keeps a busy public server's chatter off the feed unless",
+                         "there is a reason to relay it. (A gameRelayMentions trigger still pings regardless of this.)")
+                .define("relayGameToDiscordEngagedOnly", DEFAULT_RELAY_GAME_TO_DISCORD_ENGAGED_ONLY);
+        GAME_RELAY_MENTIONS = b
+                .comment("Chat-tag triggers that bypass relayGameToDiscordEngagedOnly AND ping a Discord user,",
+                         "reusing DP's trusted-mention path. Each entry is '@token=<@discordUserId>' (or",
+                         "'@token=discordUserId'): the token typed in chat is rewritten to a real <@id> mention so",
+                         "Discord notifies that user via allowed_mentions (player names / raw chat never ping). A",
+                         "bare '@token' is gate-only (no ping). Case-insensitive substring, e.g.",
+                         "[\"@dev=<@342110421114945537>\", \"@brennanhatton=<@342110421114945537>\"]. Empty = none.")
+                .defineListAllowEmpty("gameRelayMentions", () -> List.<String>of(), () -> "",
+                        o -> o instanceof String);
         DISCORD_TO_GAME_FORMAT = b
                 .comment("Format for a relayed Discord message shown in-game.",
                          "'{user}' = the Discord author's name, '{msg}' = their message text.")
@@ -313,6 +357,13 @@ public final class DiscordPresenceConfig {
                          "'{player}' is replaced with the player's name. Empty list = no group auto-response.")
                 .defineListAllowEmpty("groupMessages", () -> DEFAULT_AUTO_RESPONSE_GROUP_MESSAGES, () -> "",
                         o -> o instanceof String);
+        MENTION_HINT_MESSAGES = b
+                .comment("Second flavour line shown AFTER the whisper, nudging the player to tag the dev so they",
+                         "can actually be heard. Only used when relayGameToDiscordEngagedOnly is on and the player",
+                         "did not already tag. One picked at random. '{player}' = name; the '@dev' handle should",
+                         "match a gameRelayMentions trigger. Empty list = no hint.")
+                .defineListAllowEmpty("mentionHintMessages", () -> DEFAULT_MENTION_HINT_MESSAGES, () -> "",
+                        o -> o instanceof String);
         b.pop();
 
         SPEC = b.build();
@@ -418,6 +469,31 @@ public final class DiscordPresenceConfig {
         return isLoaded() ? DISCORD_TO_GAME_FORMAT.get() : DEFAULT_DISCORD_TO_GAME_FORMAT;
     }
 
+    /**
+     * Whether game→Discord chat relay is gated to engaged players + mention triggers. A bundling mod
+     * can force this on via the provider; otherwise it follows config (default off). Standalone DP and
+     * DT both get the default (off) unless a server admin sets it.
+     */
+    public static boolean isRelayGameToDiscordEngagedOnly() {
+        if (DiscordCredentials.providerRequireEngagementForGameRelay()) {
+            return true;
+        }
+        return isLoaded() ? RELAY_GAME_TO_DISCORD_ENGAGED_ONLY.get() : DEFAULT_RELAY_GAME_TO_DISCORD_ENGAGED_ONLY;
+    }
+
+    /**
+     * The chat-tag triggers: the admin's config entries (first, so they win on a token clash) unioned
+     * with any supplied by a bundling mod's provider. Parsed by {@code MentionTrigger.parse}.
+     */
+    public static List<String> getGameRelayMentions() {
+        List<String> result = new ArrayList<>();
+        if (isLoaded()) {
+            result.addAll(GAME_RELAY_MENTIONS.get());
+        }
+        result.addAll(DiscordCredentials.providerGameRelayMentions());
+        return result;
+    }
+
     public static boolean isCreateThreadOnJoin() {
         return isLoaded() ? CREATE_THREAD_ON_JOIN.get() : true;
     }
@@ -476,6 +552,10 @@ public final class DiscordPresenceConfig {
 
     public static List<? extends String> getAutoResponseGroupMessages() {
         return isLoaded() ? AUTO_RESPONSE_GROUP_MESSAGES.get() : DEFAULT_AUTO_RESPONSE_GROUP_MESSAGES;
+    }
+
+    public static List<? extends String> getAutoResponseMentionHintMessages() {
+        return isLoaded() ? MENTION_HINT_MESSAGES.get() : DEFAULT_MENTION_HINT_MESSAGES;
     }
 
     public static boolean isShowAdvancementIcon() {

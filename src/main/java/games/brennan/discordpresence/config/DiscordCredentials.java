@@ -3,6 +3,7 @@ package games.brennan.discordpresence.config;
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
 
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
@@ -87,6 +88,36 @@ public final class DiscordCredentials {
      */
     public static String providerJoinSuffix(UUID playerId, String playerName) {
         return read(p -> p.joinMessageSuffix(playerId, playerName));
+    }
+
+    /** Whether the provider forces engagement-gated game→Discord relay; false when none / it throws. */
+    public static boolean providerRequireEngagementForGameRelay() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return false;
+        }
+        try {
+            return current.requireEngagementForGameRelay();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** The provider's game-relay mention triggers, or an empty list when none is registered / it fails. */
+    public static List<String> providerGameRelayMentions() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return List.of();
+        }
+        try {
+            List<String> value = current.gameRelayMentions();
+            return value == null ? List.of() : value;
+        } catch (Throwable t) {
+            if (WARNED.compareAndSet(false, true)) {
+                LOGGER.warn("DiscordCredentialsProvider threw; ignoring its value (this warning is logged once).", t);
+            }
+            return List.of();
+        }
     }
 
     /** Snapshot the volatile slot and read one field, mapping null / any throwable to {@code ""}. */

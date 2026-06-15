@@ -58,4 +58,24 @@ class DiscordServiceRelayTest {
         assertTrue(out.endsWith("…"));
         assertEquals("", DiscordService.sanitize(null));
     }
+
+    // --- relayGameChat: the engaged-only game→Discord gate decision ---
+
+    @Test
+    void gateOffAlwaysRelays() {
+        assertTrue(DiscordService.relayGameChat(false, false, false));
+        assertTrue(DiscordService.relayGameChat(false, false, true));
+    }
+
+    @Test
+    void gateOnRelaysWhenMentionedOrEngaged() {
+        assertTrue(DiscordService.relayGameChat(true, true, false));   // mentioned a trigger
+        assertTrue(DiscordService.relayGameChat(true, false, true));   // active Discord conversation
+        assertTrue(DiscordService.relayGameChat(true, true, true));
+    }
+
+    @Test
+    void gateOnBlocksWhenNeitherMentionedNorEngaged() {
+        assertFalse(DiscordService.relayGameChat(true, false, false));
+    }
 }

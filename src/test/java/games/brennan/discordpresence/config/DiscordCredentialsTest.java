@@ -3,7 +3,11 @@ package games.brennan.discordpresence.config;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Behaviour of the static provider holder: registration, null/throw safety, clearing. */
 class DiscordCredentialsTest {
@@ -72,5 +76,40 @@ class DiscordCredentialsTest {
     void relayBaseUrl_defaultsBlankWhenNotOverridden() {
         DiscordCredentials.register(() -> "https://relay/hook"); // only webhookUrl() overridden
         assertEquals("", DiscordCredentials.providerRelayBaseUrl());
+    }
+
+    @Test
+    void requireEngagement_defaultsFalse_providerCanEnable() {
+        DiscordCredentials.register(null);
+        assertFalse(DiscordCredentials.providerRequireEngagementForGameRelay());
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public boolean requireEngagementForGameRelay() { return true; }
+        });
+        assertTrue(DiscordCredentials.providerRequireEngagementForGameRelay());
+    }
+
+    @Test
+    void gameRelayMentions_defaultEmpty_nullAndThrowSafe() {
+        DiscordCredentials.register(null);
+        assertTrue(DiscordCredentials.providerGameRelayMentions().isEmpty());
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public List<String> gameRelayMentions() { return null; }
+        });
+        assertTrue(DiscordCredentials.providerGameRelayMentions().isEmpty()); // null → empty
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public List<String> gameRelayMentions() { throw new RuntimeException("boom"); }
+        });
+        assertTrue(DiscordCredentials.providerGameRelayMentions().isEmpty()); // throw → empty
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public List<String> gameRelayMentions() { return List.of("@dev=<@1>"); }
+        });
+        assertEquals(List.of("@dev=<@1>"), DiscordCredentials.providerGameRelayMentions());
     }
 }
