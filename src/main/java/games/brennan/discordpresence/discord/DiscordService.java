@@ -736,11 +736,41 @@ public final class DiscordService {
         if (gw != null) {
             gw.stop();
         }
+
+        // Single-player / LAN host exiting to the title screen: the integrated server stops but the
+        // JVM lives on, so we can actively clear the online ("green") reaction for everyone still
+        // carrying it — they are no longer online. Driven by the durable presence store (not
+        // sessionMessages, cleared just below), so it is independent of the ServerStopping↔logout
+        // event ordering and covers every connected player. A dedicated server is skipped: its JVM
+        // is about to exit (the async removals' daemon threads would be killed mid-request), so its
+        // greens are left to the next startup reconcile, as before.
+        MinecraftServer srv = server;
+        boolean reactionsInUse = !DiscordPresenceConfig.getOnlineEmoji().isBlank() && !DiscordHttp.botUnavailable();
+        if (srv != null && shouldClearReactionsOnShutdown(srv.isDedicatedServer(), reactionsInUse)) {
+            clearOnlineReactionsOnShutdown();
+        }
+
         sessionMessages.clear();
         threadFutures.clear();
         reverse.clear();
         autoResponder.clear();
         server = null;
+    }
+
+    /**
+     * Remove the online reaction from every message the presence store still marks online and drop
+     * those records (they are offline now). Best-effort and off-thread: {@code removeOwnReaction}
+     * dispatches async on the daemon executor, so it never blocks the stopping server thread. A
+     * redundant removal (if {@link #onPlayerLeave} already cleared the same entry) is a harmless
+     * swallowed 404.
+     */
+    private void clearOnlineReactionsOnShutdown() {
+        String emoji = DiscordPresenceConfig.getOnlineEmoji();
+        Map<UUID, OnlinePresenceStore.PresenceEntry> snapshot = presenceStore.entries();
+        for (OnlinePresenceStore.PresenceEntry entry : snapshot.values()) {
+            DiscordBotClient.removeOwnReaction(entry.ref(), emoji);
+        }
+        presenceStore.dropStale(snapshot);
     }
 
     // --- death report -----------------------------------------------------
@@ -997,6 +1027,18 @@ public final class DiscordService {
      */
     static boolean shouldPostDisconnectReport(boolean enabled, boolean alive) {
         return enabled && alive;
+    }
+
+    /**
+     * Whether a server stop should actively clear the online ("green") reactions. Only an integrated
+     * server (single-player / LAN host) qualifies: its JVM stays alive after the world is exited, so
+     * the async reaction-removals complete. A dedicated server is about to exit the JVM (killing the
+     * daemon HTTP threads mid-request), so its greens are left to the next startup reconcile.
+     * {@code reactionsInUse} is false when the online emoji is blank or no bot is available — nothing
+     * to clear. Pure → unit-tested.
+     */
+    static boolean shouldClearReactionsOnShutdown(boolean dedicated, boolean reactionsInUse) {
+        return !dedicated && reactionsInUse;
     }
 
     /** Replace {@code {player}} in a template. */
