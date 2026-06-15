@@ -9,7 +9,6 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,14 +35,14 @@ class SurveyTest {
     }
 
     @Test
-    void firstUnansweredSkipsAnswered() {
+    void unansweredReturnsRemainingInOrder() {
         SurveyQuestion a = new SurveyQuestion("test:a", "A", 0, 10, true);
         SurveyQuestion b = new SurveyQuestion("test:b", "B", 0, 10, true);
         List<SurveyQuestion> bank = List.of(a, b);
 
-        assertEquals(a, SurveyManager.firstUnanswered(bank, id -> false));
-        assertEquals(b, SurveyManager.firstUnanswered(bank, Set.of("test:a")::contains));
-        assertNull(SurveyManager.firstUnanswered(bank, Set.of("test:a", "test:b")::contains));
+        assertEquals(List.of(a, b), SurveyManager.unanswered(bank, id -> false));
+        assertEquals(List.of(b), SurveyManager.unanswered(bank, Set.of("test:a")::contains));
+        assertTrue(SurveyManager.unanswered(bank, Set.of("test:a", "test:b")::contains).isEmpty());
     }
 
     @Test

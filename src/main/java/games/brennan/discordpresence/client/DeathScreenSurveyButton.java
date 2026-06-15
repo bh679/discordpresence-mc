@@ -11,16 +11,19 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 
+import java.util.List;
+
 /**
  * Client-only: injects a "Give Feedback" button onto the vanilla death screen whenever
- * the server has offered this player a survey question (see {@link SurveyClientState}).
- * The button opens the {@link SurveyScreen}.
+ * the server has sent this player one or more unanswered survey questions (see
+ * {@link SurveyClientState}). The button opens the {@link SurveyScreen}, which walks
+ * through them.
  *
- * <p>The button is added to every death screen but kept invisible until a question is
- * cached, and its visibility is re-evaluated every frame — so a question packet that
- * arrives just after the screen initialises still surfaces the button, and submitting
- * (which clears the cache) hides it again. Anchored bottom-centre, clear of vanilla's
- * button stack and Dungeon Train's death recap.</p>
+ * <p>Added to every death screen but kept invisible until questions are cached, and its
+ * visibility is re-evaluated every frame — so a packet that arrives just after the screen
+ * initialises still surfaces the button, and finishing the walk (which clears the cache)
+ * hides it again. Anchored bottom-centre, clear of vanilla's button stack and Dungeon
+ * Train's death recap.</p>
  */
 @EventBusSubscriber(modid = DiscordPresence.MOD_ID, value = Dist.CLIENT)
 public final class DeathScreenSurveyButton {
@@ -42,23 +45,23 @@ public final class DeathScreenSurveyButton {
         button = Button.builder(Component.literal("Give Feedback"), b -> openSurvey())
                 .bounds(x, y, WIDTH, HEIGHT)
                 .build();
-        button.visible = SurveyClientState.hasQuestion();
+        button.visible = SurveyClientState.hasQuestions();
         event.addListener(button);
     }
 
     @SubscribeEvent
     public static void onRender(ScreenEvent.Render.Post event) {
         if (button != null && event.getScreen() instanceof DeathScreen) {
-            button.visible = SurveyClientState.hasQuestion();
+            button.visible = SurveyClientState.hasQuestions();
         }
     }
 
     private static void openSurvey() {
-        SurveyQuestionPayload question = SurveyClientState.current();
-        if (question == null) {
+        List<SurveyQuestionPayload.Entry> questions = SurveyClientState.questions();
+        if (questions.isEmpty()) {
             return;
         }
         Minecraft mc = Minecraft.getInstance();
-        mc.setScreen(new SurveyScreen(mc.screen, question));
+        mc.setScreen(new SurveyScreen(mc.screen, questions));
     }
 }

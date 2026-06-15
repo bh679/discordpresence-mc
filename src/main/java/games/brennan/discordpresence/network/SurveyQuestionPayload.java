@@ -8,19 +8,22 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
-/**
- * Server → client: the player's CURRENT survey question to offer on the death screen,
- * or "none" ({@code present == false}) to hide the Feedback button. Pushed on death
- * (the next unanswered question) and cleared after the player submits, so each death
- * surfaces exactly one new question.
- */
-public record SurveyQuestionPayload(boolean present, String questionId, String prompt,
-                                    int scaleMin, int scaleMax, boolean allowComment)
-        implements CustomPacketPayload {
+import java.util.ArrayList;
+import java.util.List;
 
-    /** The "no question — hide the button" sentinel. */
-    public static final SurveyQuestionPayload NONE =
-            new SurveyQuestionPayload(false, "", "", 0, 0, false);
+/**
+ * Server → client: the player's UNANSWERED survey questions for this death, in ask-order.
+ * The client walks them one screen at a time (each submitted + posted to Discord). An
+ * empty list hides the death-screen Feedback button. Re-sent on each death, recomputed
+ * from what the player has already answered.
+ */
+public record SurveyQuestionPayload(List<Entry> questions) implements CustomPacketPayload {
+
+    /** One question's client-facing fields. */
+    public record Entry(String id, String prompt, int scaleMin, int scaleMax, boolean allowComment) {}
+
+    /** The "no questions — hide the button" sentinel. */
+    public static final SurveyQuestionPayload NONE = new SurveyQuestionPayload(List.of());
 
     public static final Type<SurveyQuestionPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(DiscordPresence.MOD_ID, "survey_question"));
@@ -31,28 +34,28 @@ public record SurveyQuestionPayload(boolean present, String questionId, String p
                     SurveyQuestionPayload::decode);
 
     private void encode(RegistryFriendlyByteBuf buf) {
-        buf.writeBoolean(present);
-        if (!present) {
-            return;
+        buf.writeVarInt(questions.size());
+        for (Entry e : questions) {
+            buf.writeUtf(e.id());
+            buf.writeUtf(e.prompt());
+            buf.writeVarInt(e.scaleMin());
+            buf.writeVarInt(e.scaleMax());
+            buf.writeBoolean(e.allowComment());
         }
-        buf.writeUtf(questionId);
-        buf.writeUtf(prompt);
-        buf.writeVarInt(scaleMin);
-        buf.writeVarInt(scaleMax);
-        buf.writeBoolean(allowComment);
     }
 
     private static SurveyQuestionPayload decode(RegistryFriendlyByteBuf buf) {
-        boolean present = buf.readBoolean();
-        if (!present) {
-            return NONE;
+        int size = buf.readVarInt();
+        List<Entry> questions = new ArrayList<>(size);
+        for (int i = 0; i < size; i++) {
+            String id = buf.readUtf();
+            String prompt = buf.readUtf();
+            int scaleMin = buf.readVarInt();
+            int scaleMax = buf.readVarInt();
+            boolean allowComment = buf.readBoolean();
+            questions.add(new Entry(id, prompt, scaleMin, scaleMax, allowComment));
         }
-        String questionId = buf.readUtf();
-        String prompt = buf.readUtf();
-        int scaleMin = buf.readVarInt();
-        int scaleMax = buf.readVarInt();
-        boolean allowComment = buf.readBoolean();
-        return new SurveyQuestionPayload(true, questionId, prompt, scaleMin, scaleMax, allowComment);
+        return new SurveyQuestionPayload(List.copyOf(questions));
     }
 
     @Override
@@ -60,8 +63,8 @@ public record SurveyQuestionPayload(boolean present, String questionId, String p
         return TYPE;
     }
 
-    /** Client-side: cache the offered question (or clear it). Runs on the client only. */
+    /** Client-side: cache the session's questions (or clear). Runs on the client only. */
     public static void handle(SurveyQuestionPayload payload, IPayloadContext ctx) {
-        ctx.enqueueWork(() -> SurveyClientState.set(payload));
+        ctx.enqueueWork(() -> SurveyClientState.set(payload.questions()));
     }
 }
