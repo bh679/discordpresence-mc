@@ -2,6 +2,10 @@
 .gradle/
 build/
 
+# Dev run logs (from ./gradlew runClient/runServer | tee)
+run-client.log
+run-server.log
+
 # IDE
 .idea/
 *.iml

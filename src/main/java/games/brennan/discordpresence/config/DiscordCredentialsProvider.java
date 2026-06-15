@@ -1,5 +1,6 @@
 package games.brennan.discordpresence.config;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -65,5 +66,27 @@ public interface DiscordCredentialsProvider {
      */
     default String joinMessageSuffix(UUID playerId, String playerName) {
         return "";
+    }
+
+    /**
+     * Whether DP should restrict game→Discord chat relay to <i>engaged</i> players (those Discord
+     * is actively conversing with) plus messages containing a {@link #gameRelayMentions()} trigger.
+     * Forces on DP's {@code relayGameToDiscordEngagedOnly} config (off by default standalone). Default
+     * false — a bundling mod opts in explicitly; DP relays all chat as configured otherwise.
+     */
+    default boolean requireEngagementForGameRelay() {
+        return false;
+    }
+
+    /**
+     * Chat-tag triggers that bypass the engagement gate and ping a Discord user, reusing DP's
+     * trusted-mention path (the same {@code allowed_mentions.users} mechanism as the join suffix).
+     * Each entry is {@code "@token=<@discordUserId>"} (or {@code "@token=discordUserId"}), e.g.
+     * {@code "@dev=<@342110421114945537>"}; a bare {@code "@token"} is gate-only (no ping). Matching
+     * is case-insensitive substring. Unioned with the admin's {@code gameRelayMentions} config.
+     * Default empty (no triggers).
+     */
+    default List<String> gameRelayMentions() {
+        return List.of();
     }
 }

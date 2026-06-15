@@ -275,14 +275,35 @@ public final class DiscordService {
         }
         UUID uuid = player.getUUID();
         String name = player.getGameProfile().getName();
-        String threadId = threadStore.threadId(uuid); // into the player's thread if they have one (null → top-level)
-        DiscordWebhookClient.postChat(name, uuid, text, threadId).thenAccept(ref -> {
-            if (ref != null) {
-                reverse.put(ref.messageId(), uuid);
-            }
-        });
-        // In-game flavour feedback when the player is "whispering into the darkness".
-        autoResponder.onPlayerChat(player);
+
+        // Configured chat-tag triggers (e.g. @dev): rewrite to a real <@id> mention and collect the ids
+        // allowed to ping, reusing the trusted-mention path. Applied whenever the line is relayed —
+        // gate on or off — so a tag pings like a player-name tag.
+        List<MentionTrigger> triggers = MentionTrigger.parse(DiscordPresenceConfig.getGameRelayMentions());
+        boolean mentioned = MentionTrigger.matches(text, triggers);
+
+        // Engaged-only gate (opt-in): relay only when Discord is actively conversing with this player,
+        // or the line carries a trigger. When gated out, suggest tagging the dev (unless already tagged).
+        boolean relay = true;
+        boolean suggestMention = false;
+        if (DiscordPresenceConfig.isRelayGameToDiscordEngagedOnly()) {
+            relay = relayGameChat(true, mentioned, autoResponder.hasActiveDiscordConversation(uuid));
+            suggestMention = !mentioned;
+        }
+
+        if (relay) {
+            String content = MentionTrigger.applyPings(text, triggers);
+            List<String> pingIds = MentionTrigger.pingUserIds(text, triggers);
+            String threadId = threadStore.threadId(uuid); // into the player's thread if they have one (null → top-level)
+            DiscordWebhookClient.postChat(name, uuid, content, threadId, pingIds).thenAccept(ref -> {
+                if (ref != null) {
+                    reverse.put(ref.messageId(), uuid);
+                }
+            });
+        }
+        // In-game flavour feedback when the player is "whispering into the darkness" (+ a "tag the dev"
+        // nudge when the gate would otherwise swallow the line). Self-gates on the armed/cooldown state.
+        autoResponder.onPlayerChat(player, suggestMention);
     }
 
     /**
@@ -338,6 +359,36 @@ public final class DiscordService {
             return false;
         }
         return index.contains(msg.referencedMessageId()) || index.contains(msg.channelId());
+    }
+
+    /**
+     * Pure game→Discord relay decision for the engaged-only gate: relay when the gate is off, or the
+     * line mentioned a trigger, or Discord is actively conversing with the player. Extracted so it is
+     * unit-testable.
+     */
+    static boolean relayGameChat(boolean engagedOnly, boolean mentioned, boolean activeConversation) {
+        return !engagedOnly || mentioned || activeConversation;
+    }
+
+    /**
+     * A yellow-highlighted copy of {@code rawText} for in-game display when it contains a configured
+     * chat-tag token (e.g. {@code @dev}), or {@code null} when there is nothing to highlight — so the
+     * caller leaves vanilla chat untouched. Independent of the relay gate: the tag is coloured whenever
+     * it is configured. Server-side (the broadcast everyone sees).
+     */
+    public Component colorizeChatTags(String rawText) {
+        if (rawText == null || rawText.isEmpty()) {
+            return null;
+        }
+        List<MentionTrigger> triggers = MentionTrigger.parse(DiscordPresenceConfig.getGameRelayMentions());
+        if (triggers.isEmpty()) {
+            return null;
+        }
+        List<String> tokens = new ArrayList<>();
+        for (MentionTrigger t : triggers) {
+            tokens.add(t.token());
+        }
+        return ChatTagHighlighter.hasMatch(rawText, tokens) ? ChatTagHighlighter.toComponent(rawText, tokens) : null;
     }
 
     /**

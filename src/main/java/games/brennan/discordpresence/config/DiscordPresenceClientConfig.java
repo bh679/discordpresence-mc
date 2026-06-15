@@ -2,6 +2,8 @@ package games.brennan.discordpresence.config;
 
 import net.neoforged.neoforge.common.ModConfigSpec;
 
+import java.util.List;
+
 /**
  * Client-scoped config for Discord Presence, stored at
  * {@code <config>/discordpresence-client.toml}.
@@ -20,8 +22,11 @@ public final class DiscordPresenceClientConfig {
     /** Tri-state answer to the one-time network confirmation. */
     public enum Consent { UNSET, GRANTED, DENIED }
 
+    public static final List<String> DEFAULT_CHAT_TAG_SUGGESTIONS = List.of("@dev", "@brennanhatton");
+
     public static final ModConfigSpec SPEC;
     public static final ModConfigSpec.EnumValue<Consent> NETWORK_CONSENT;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> CHAT_TAG_SUGGESTIONS;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -31,6 +36,14 @@ public final class DiscordPresenceClientConfig {
                          "UNSET shows a one-time confirmation on the title screen; GRANTED enables the",
                          "network features in singleplayer/LAN; DENIED keeps them off. Change it anytime.")
                 .defineEnum("networkConsent", Consent.UNSET);
+        b.pop();
+        b.push("chat");
+        CHAT_TAG_SUGGESTIONS = b
+                .comment("Chat-box autocomplete suggestions: plain tokens (e.g. \"@dev\") offered as you type,",
+                         "completed with Tab like a command argument. Should match the server's gameRelayMentions",
+                         "tokens so a completed tag actually pings. Empty = no chat-tag autocomplete.")
+                .defineListAllowEmpty("tagSuggestions", () -> DEFAULT_CHAT_TAG_SUGGESTIONS, () -> "",
+                        o -> o instanceof String);
         b.pop();
         SPEC = b.build();
     }
@@ -62,5 +75,10 @@ public final class DiscordPresenceClientConfig {
             NETWORK_CONSENT.set(consent);
             NETWORK_CONSENT.save();
         }
+    }
+
+    /** Chat-box autocomplete tokens (e.g. {@code "@dev"}); falls back to the defaults when unloaded. */
+    public static List<? extends String> getChatTagSuggestions() {
+        return isLoaded() ? CHAT_TAG_SUGGESTIONS.get() : DEFAULT_CHAT_TAG_SUGGESTIONS;
     }
 }

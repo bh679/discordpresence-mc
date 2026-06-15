@@ -1,8 +1,10 @@
 package games.brennan.discordpresence.discord;
 
+import games.brennan.discordpresence.config.DiscordPresenceConfig;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -123,5 +125,33 @@ class AutoResponderTest {
     @Test
     void composeNullTemplateReturnsNull() {
         assertNull(AutoResponder.compose(null, "Steve", "a", "b", "c"));
+    }
+
+    // --- hasActiveDiscordConversation: the engaged-only gate's "Discord is talking to this player" read ---
+
+    @Test
+    void noDiscordActivity_notInConversation() {
+        AutoResponder ar = new AutoResponder();
+        assertFalse(ar.hasActiveDiscordConversation(UUID.randomUUID()));
+    }
+
+    @Test
+    void recentDiscordActivity_inConversation() {
+        AutoResponder ar = new AutoResponder();
+        UUID uuid = UUID.randomUUID();
+        ar.onDiscordActivity(uuid); // just now → within the default 30-min rearm window
+        assertTrue(ar.hasActiveDiscordConversation(uuid));
+    }
+
+    // --- default "tag the dev" hint pool ---
+
+    @Test
+    void defaultMentionHintPoolNonEmptyAndTemplated() {
+        List<? extends String> hints = DiscordPresenceConfig.getAutoResponseMentionHintMessages();
+        assertFalse(hints.isEmpty());
+        for (String hint : hints) {
+            assertTrue(hint.contains("{player}"), "hint should contain {player}: " + hint);
+            assertTrue(hint.contains("@dev"), "hint should suggest tagging @dev: " + hint);
+        }
     }
 }
