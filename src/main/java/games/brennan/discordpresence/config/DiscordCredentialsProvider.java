@@ -98,4 +98,17 @@ public interface DiscordCredentialsProvider {
     default List<String> gameRelayMentions() {
         return List.of();
     }
+
+    /**
+     * Discord user ids whose online presence DP should track for the "last seen online" query seam
+     * ({@code DiscordService.lastSeenOnline} / {@code isDiscordUserOnline}). Unioned with the admin's
+     * {@code presenceTrackUserIds} config. A non-empty result makes DP request the privileged
+     * {@code GUILD_PRESENCES} intent (which must be enabled in the Developer Portal) and — in
+     * direct-bot mode — open the gateway to receive presence events even when two-way chat is off.
+     * Default empty (no tracking). Note: in relay-mode DP holds no local gateway, so presence must be
+     * served by the relay (see the mod's relay notes) — this list alone won't light it up there.
+     */
+    default List<String> presenceTrackUserIds() {
+        return List.of();
+    }
 }

@@ -20,6 +20,7 @@ import net.neoforged.fml.loading.FMLPaths;
 import org.slf4j.Logger;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -74,6 +75,7 @@ public final class DiscordService {
     private static final String THREAD_STORE_FILE = "discordpresence-threads.json";
     private static final String AUTO_RESPONSE_STORE_FILE = "discordpresence-autoresponse.json";
     private static final String PRESENCE_STORE_FILE = "discordpresence-presence.json";
+    private static final String DISCORD_PRESENCE_STORE_FILE = "discordpresence-discord-presence.json";
 
     private static final DiscordService INSTANCE = new DiscordService();
 
@@ -85,6 +87,9 @@ public final class DiscordService {
 
     /** Durable record of who currently carries the online reaction, for crash-safe cleanup. */
     private final OnlinePresenceStore presenceStore = new OnlinePresenceStore();
+
+    /** Durable Discord user-id → last-seen-online presence, fed by the gateway; backs the query seam. */
+    private final DiscordPresenceStore discordPresenceStore = new DiscordPresenceStore();
 
     private final ConcurrentHashMap<UUID, CompletableFuture<DiscordMessageRef>> sessionMessages =
             new ConcurrentHashMap<>();
@@ -136,30 +141,52 @@ public final class DiscordService {
         threadStore.load(file);
     }
 
-    /** Opens the gateway (if inbound relay is enabled and consented) once the server is up. */
+    /** Load the persisted Discord user-id → last-seen-presence map on server start (before any presence event). */
+    public void loadDiscordPresence() {
+        discordPresenceStore.load(FMLPaths.CONFIGDIR.get().resolve(DISCORD_PRESENCE_STORE_FILE));
+    }
+
+    /**
+     * Opens the gateway once the server is up, when consented and either inbound chat relay
+     * ({@code relayDiscordToGame}) or presence tracking ({@code presenceTrackUserIds}) is enabled. The
+     * IDENTIFY intents are computed from exactly those two flags, so a privileged intent is requested
+     * only for a feature actually in use (an upgrader who enables neither sends the unchanged intents).
+     */
     public void onServerStarted(MinecraftServer startedServer) {
         this.server = startedServer;
         autoResponder.loadState(FMLPaths.CONFIGDIR.get().resolve(AUTO_RESPONSE_STORE_FILE));
-        LOGGER.info("Discord Presence onServerStarted: dedicated={}, webhookSet={}, consent={}, relayDiscordToGame={}, botTokenSet={}",
+        boolean wantInbound = DiscordPresenceConfig.isRelayDiscordToGame();
+        boolean wantPresence = DiscordPresenceConfig.isPresenceTrackingEnabled();
+        LOGGER.info("Discord Presence onServerStarted: dedicated={}, webhookSet={}, consent={}, relayDiscordToGame={}, presenceTracking={}, botTokenSet={}",
                 startedServer.isDedicatedServer(), enabled(),
-                DiscordPresenceClientConfig.getConsent(), DiscordPresenceConfig.isRelayDiscordToGame(),
+                DiscordPresenceClientConfig.getConsent(), wantInbound, wantPresence,
                 !DiscordPresenceConfig.getBotToken().isBlank());
         startPresenceTracking(startedServer);
-        if (!enabled() || !networkAllowed(startedServer) || !DiscordPresenceConfig.isRelayDiscordToGame()) {
+        if (!enabled() || !networkAllowed(startedServer) || !(wantInbound || wantPresence)) {
             return;
         }
         GatewayConnection gw;
         if (DiscordPresenceConfig.isRelayMode()) {
+            // Relay-mode: the relay owns the Discord protocol and forwards chat, but not (yet) presence,
+            // so presence tracking has no local gateway to attach to here — it is served by the relay
+            // (Phase 2). Start the relay gateway only when inbound chat relay is on, as before.
+            if (!wantInbound) {
+                LOGGER.info("Discord Presence: presenceTrackUserIds is set but relay-mode has no local gateway; "
+                        + "presence must be served by the relay — none started.");
+                return;
+            }
             LOGGER.info("Discord Presence: starting relay gateway…");
             gw = new RelayGateway(DiscordPresenceConfig.getRelayGatewayUrl(), this::onDiscordMessage);
         } else {
             String token = DiscordPresenceConfig.getBotToken();
             if (token.isBlank()) {
-                LOGGER.warn("relayDiscordToGame is on but botToken is blank — gateway not started.");
+                LOGGER.warn("Gateway not started: botToken is blank (required for relayDiscordToGame / presenceTrackUserIds).");
                 return;
             }
-            LOGGER.info("Discord Presence: starting gateway…");
-            gw = new DiscordGateway(token, this::onDiscordMessage);
+            int gatewayIntents = GatewayPayloads.intentsFor(wantInbound, wantPresence);
+            LOGGER.info("Discord Presence: starting gateway (inbound={}, presence={})…", wantInbound, wantPresence);
+            gw = new DiscordGateway(token, gatewayIntents, this::onDiscordMessage,
+                    wantPresence ? this::onDiscordPresence : null);
         }
         this.gateway = gw;
         gw.start();
@@ -464,6 +491,52 @@ public final class DiscordService {
         }
         // Hop to the server thread; broadcast as a SYSTEM message (does not re-fire ServerChatEvent).
         srv.execute(() -> srv.getPlayerList().broadcastSystemMessage(Component.literal(line), false));
+    }
+
+    // --- presence tracking + query seam ---
+
+    /**
+     * Gateway → store: record a <i>tracked</i> Discord user's presence. Called off-thread on a Discord
+     * daemon thread by {@link DiscordGateway} (for both {@code PRESENCE_UPDATE} and each entry of the
+     * {@code GUILD_CREATE} snapshot). Store-only — no server-thread hop and no game side effect.
+     * Filters to {@link DiscordPresenceConfig#getPresenceTrackUserIds()} because a GUILD_CREATE snapshot
+     * carries every guild member's presence; we keep only the configured ids.
+     */
+    private void onDiscordPresence(PresenceUpdate presence) {
+        if (presence == null || !presence.hasUserId()) {
+            return;
+        }
+        if (!DiscordPresenceConfig.getPresenceTrackUserIds().contains(presence.userId())) {
+            return;
+        }
+        discordPresenceStore.record(presence.userId(), presence.status(), System.currentTimeMillis());
+        LOGGER.debug("Discord presence: tracked user {} is now '{}'.", presence.userId(), presence.status());
+    }
+
+    /**
+     * The instant a tracked Discord user was last seen online, or empty when unknown — not tracked,
+     * never observed online, the presence intent/gateway isn't running, or relay-mode without relay
+     * presence support. A consumer renders e.g. "last seen online {Duration} ago"; pair with
+     * {@link #isDiscordUserOnline} to show "online now" when they are currently online.
+     *
+     * <p><b>Public API.</b> A bundling mod (e.g. Dungeon Train) calls this with a Discord user id it
+     * configured via {@link games.brennan.discordpresence.config.DiscordCredentialsProvider#presenceTrackUserIds()}
+     * (or the server admin's {@code presenceTrackUserIds}). Absent-safe by design, so the consumer
+     * degrades gracefully whenever presence is unknown.</p>
+     */
+    public Optional<Instant> lastSeenOnline(String discordUserId) {
+        return discordPresenceStore.lastOnlineMillis(discordUserId).map(Instant::ofEpochMilli);
+    }
+
+    /**
+     * Whether a tracked Discord user is currently online (any non-offline status), or empty when
+     * unknown (same conditions as {@link #lastSeenOnline}). {@code Optional.of(false)} = we have a
+     * record and they are offline; {@code Optional.empty()} = we hold no presence for them.
+     *
+     * <p><b>Public API</b> — see {@link #lastSeenOnline}.</p>
+     */
+    public Optional<Boolean> isDiscordUserOnline(String discordUserId) {
+        return discordPresenceStore.status(discordUserId).map(s -> !PresenceUpdate.OFFLINE.equals(s));
     }
 
     /**

@@ -140,4 +140,29 @@ class DiscordPresenceConfigSeamTest {
         assertEquals(List.of("@dev=<@342110421114945537>", "@brennanhatton=<@342110421114945537>"),
                 DiscordPresenceConfig.getGameRelayMentions());
     }
+
+    @Test
+    void presenceTrackingDefaultsOff_andProviderEnablesIt() {
+        // No provider + config unloaded → no tracked ids, tracking disabled.
+        DiscordCredentials.register(null);
+        assertTrue(DiscordPresenceConfig.getPresenceTrackUserIds().isEmpty());
+        assertFalse(DiscordPresenceConfig.isPresenceTrackingEnabled());
+        // A bundling mod supplies the ids (this is how DT will configure Brennan's id).
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public List<String> presenceTrackUserIds() { return List.of("342110421114945537"); }
+        });
+        assertEquals(List.of("342110421114945537"), DiscordPresenceConfig.getPresenceTrackUserIds());
+        assertTrue(DiscordPresenceConfig.isPresenceTrackingEnabled());
+    }
+
+    @Test
+    void presenceTrackUserIds_nullProviderListIsSafe() {
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public List<String> presenceTrackUserIds() { return null; }
+        });
+        assertTrue(DiscordPresenceConfig.getPresenceTrackUserIds().isEmpty());
+        assertFalse(DiscordPresenceConfig.isPresenceTrackingEnabled());
+    }
 }

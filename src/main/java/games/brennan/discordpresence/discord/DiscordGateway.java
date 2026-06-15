@@ -22,7 +22,7 @@ import java.util.function.Consumer;
  * read path of the two-way bridge. Implements the v10 protocol by hand over the
  * JDK {@link WebSocket} (no JDA / Discord4J, preserving the mod's zero-dependency
  * property): {@code GET /gateway/bot} → HELLO/heartbeat (with ACK zombie
- * detection) → IDENTIFY (with the privileged Message Content intent) → DISPATCH
+ * detection) → IDENTIFY (with the configured intents, incl. any privileged ones) → DISPATCH
  * {@code MESSAGE_CREATE} → RESUME/reconnect with exponential backoff.
  *
  * <p>Best-effort, exactly like the REST clients: every failure is logged and
@@ -38,7 +38,10 @@ final class DiscordGateway implements GatewayConnection {
     private static final long MAX_BACKOFF_SECONDS = 60;
 
     private final String token;
+    private final int intents;
     private final Consumer<InboundMessage> onMessage;
+    /** Presence consumer, or {@code null} when presence tracking is off (no GUILD_PRESENCES intent). */
+    private final Consumer<PresenceUpdate> onPresence;
 
     private volatile WebSocket webSocket;
     private volatile boolean running;
@@ -55,9 +58,20 @@ final class DiscordGateway implements GatewayConnection {
     private final AtomicReference<CompletableFuture<WebSocket>> lastSend =
             new AtomicReference<>(CompletableFuture.completedFuture(null));
 
-    DiscordGateway(String token, Consumer<InboundMessage> onMessage) {
+    /**
+     * @param token     the bot token
+     * @param intents   the gateway intents to IDENTIFY with (see {@link GatewayPayloads#intentsFor})
+     * @param onMessage receives relayed {@code MESSAGE_CREATE}s for two-way chat
+     * @param onPresence receives presence events ({@code PRESENCE_UPDATE} + the {@code GUILD_CREATE}
+     *                   snapshot), or {@code null} to disable presence routing (when the
+     *                   {@code GUILD_PRESENCES} intent is not requested)
+     */
+    DiscordGateway(String token, int intents,
+                   Consumer<InboundMessage> onMessage, Consumer<PresenceUpdate> onPresence) {
         this.token = token;
+        this.intents = intents;
         this.onMessage = onMessage;
+        this.onPresence = onPresence;
     }
 
     // --- lifecycle ---
@@ -281,7 +295,7 @@ final class DiscordGateway implements GatewayConnection {
                 if (resuming && sessionId != null && lastSeq != null) {
                     send(GatewayPayloads.resume(token, sessionId, lastSeq));
                 } else {
-                    send(GatewayPayloads.identify(token));
+                    send(GatewayPayloads.identify(token, intents));
                 }
             }
             case GatewayPayloads.OP_HEARTBEAT -> send(GatewayPayloads.heartbeat(lastSeq));
@@ -324,6 +338,28 @@ final class DiscordGateway implements GatewayConnection {
                     LOGGER.warn("Failed to route MESSAGE_CREATE", e);
                 }
             }
+            case "PRESENCE_UPDATE" -> {
+                if (onPresence != null) {
+                    try {
+                        onPresence.accept(GatewayPayloads.presence(payload.getAsJsonObject("d")));
+                    } catch (Exception e) {
+                        LOGGER.warn("Failed to route PRESENCE_UPDATE", e);
+                    }
+                }
+            }
+            case "GUILD_CREATE" -> {
+                // The initial presence snapshot for a guild we share — seeds "who is online" at
+                // connect (PRESENCE_UPDATE is changes-only and not replayed). Only with the intent.
+                if (onPresence != null) {
+                    try {
+                        for (PresenceUpdate p : GatewayPayloads.guildCreatePresences(payload.getAsJsonObject("d"))) {
+                            onPresence.accept(p);
+                        }
+                    } catch (Exception e) {
+                        LOGGER.warn("Failed to route GUILD_CREATE presences", e);
+                    }
+                }
+            }
             default -> { /* ignore other dispatch events */ }
         }
     }
@@ -364,7 +400,9 @@ final class DiscordGateway implements GatewayConnection {
             case 4004 -> LOGGER.error("Discord rejected the bot token (4004). Check 'botToken' in "
                     + "discordpresence-server.toml. Gateway disabled until restart.");
             case 4014 -> LOGGER.error("Discord refused the gateway: disallowed intent(s) (4014). Enable the "
-                    + "'MESSAGE CONTENT INTENT' for the bot in the Discord Developer Portal "
+                    + "privileged intent(s) you use — 'MESSAGE CONTENT' for two-way chat (relayDiscordToGame) "
+                    + "and 'PRESENCE INTENT' for presence tracking (presenceTrackUserIds) — for the bot in the "
+                    + "Discord Developer Portal "
                     + "(Bot → Privileged Gateway Intents), then restart. Gateway disabled until then.");
             case 4013 -> LOGGER.error("Discord refused the gateway intents (4013). Gateway disabled until restart.");
             default -> LOGGER.error("Discord closed the gateway with a fatal code {}. Gateway disabled until restart.",

@@ -1,7 +1,11 @@
 package games.brennan.discordpresence.discord;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Pure (no-I/O, no-state) helpers for the Discord Gateway v10 wire protocol:
@@ -28,19 +32,50 @@ final class GatewayPayloads {
     static final int OP_HEARTBEAT_ACK = 11;
 
     // --- Gateway intents (bit flags) ---
-    static final int INTENT_GUILDS = 1;                // 1 << 0
-    static final int INTENT_GUILD_MESSAGES = 1 << 9;   // 512
-    static final int INTENT_MESSAGE_CONTENT = 1 << 15; // 32768 — PRIVILEGED (portal toggle required)
+    static final int INTENT_GUILDS = 1;                  // 1 << 0
+    static final int INTENT_GUILD_PRESENCES = 1 << 8;    // 256 — PRIVILEGED (portal toggle required)
+    static final int INTENT_GUILD_MESSAGES = 1 << 9;     // 512
+    static final int INTENT_MESSAGE_CONTENT = 1 << 15;   // 32768 — PRIVILEGED (portal toggle required)
 
-    /** See guilds + their text-channel messages + the message text itself. */
+    /**
+     * The two-way-chat intents: guilds + their text-channel messages + the message text itself. The
+     * fixed baseline the mod has always identified with; presence tracking layers on via
+     * {@link #intentsFor(boolean, boolean)} only when opted in.
+     */
     static final int INTENTS = INTENT_GUILDS | INTENT_GUILD_MESSAGES | INTENT_MESSAGE_CONTENT; // 33281
+
+    /**
+     * The gateway intents to IDENTIFY with for the requested features. {@code GUILDS} is always
+     * included (it delivers the {@code GUILD_CREATE} presence snapshot). {@code wantMessages} adds the
+     * two-way-chat message intents (incl. the privileged Message Content); {@code wantPresence} adds
+     * the privileged {@code GUILD_PRESENCES}. Pure — so each privileged intent is requested only when
+     * its feature is actually enabled: a presence-only operator never asks for Message Content, and an
+     * upgrader who enables neither presence nor (the default-on) chat still gets exactly the value the
+     * mod has always sent. {@code intentsFor(true, false) == }{@link #INTENTS}.
+     */
+    static int intentsFor(boolean wantMessages, boolean wantPresence) {
+        int intents = INTENT_GUILDS;
+        if (wantMessages) {
+            intents |= INTENT_GUILD_MESSAGES | INTENT_MESSAGE_CONTENT;
+        }
+        if (wantPresence) {
+            intents |= INTENT_GUILD_PRESENCES;
+        }
+        return intents;
+    }
 
     /** Query appended to the gateway URL: JSON encoding on API v10. */
     static final String GATEWAY_QUERY = "?v=10&encoding=json";
 
     // --- outbound payload builders ---
 
+    /** IDENTIFY with the default two-way-chat {@link #INTENTS}. */
     static String identify(String token) {
+        return identify(token, INTENTS);
+    }
+
+    /** IDENTIFY with an explicit intent bitset (see {@link #intentsFor(boolean, boolean)}). */
+    static String identify(String token, int intents) {
         JsonObject props = new JsonObject();
         props.addProperty("os", "java");
         props.addProperty("browser", "DiscordPresence");
@@ -48,7 +83,7 @@ final class GatewayPayloads {
 
         JsonObject d = new JsonObject();
         d.addProperty("token", token);
-        d.addProperty("intents", INTENTS);
+        d.addProperty("intents", intents);
         d.add("properties", props);
         return op(OP_IDENTIFY, d);
     }
@@ -132,6 +167,37 @@ final class GatewayPayloads {
         }
 
         return new InboundMessage(authorName, content, bot, hasWebhookId, channelId, referencedMessageId);
+    }
+
+    /**
+     * Parse a {@code PRESENCE_UPDATE} data object into the (user id, status) pair the presence
+     * tracker needs. Tolerant of missing keys (blank/null) so a malformed frame can never throw
+     * into the gateway receive loop.
+     */
+    static PresenceUpdate presence(JsonObject d) {
+        String userId = null;
+        if (d.has("user") && d.get("user").isJsonObject()) {
+            userId = str(d.getAsJsonObject("user"), "id");
+        }
+        return new PresenceUpdate(userId, str(d, "status"));
+    }
+
+    /**
+     * Parse the {@code presences} array of a {@code GUILD_CREATE} data object — the initial presence
+     * snapshot for a guild (each entry the same shape {@link #presence} reads). Returns an empty list
+     * when absent or malformed. {@code PRESENCE_UPDATE} is changes-only and is not replayed on
+     * connect, so this snapshot is the only way to learn who is already online at connect time.
+     */
+    static List<PresenceUpdate> guildCreatePresences(JsonObject d) {
+        List<PresenceUpdate> out = new ArrayList<>();
+        if (d.has("presences") && d.get("presences").isJsonArray()) {
+            for (JsonElement el : d.getAsJsonArray("presences")) {
+                if (el != null && el.isJsonObject()) {
+                    out.add(presence(el.getAsJsonObject()));
+                }
+            }
+        }
+        return out;
     }
 
     // --- small JSON accessors (null/missing tolerant) ---

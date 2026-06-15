@@ -4,6 +4,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -120,5 +122,77 @@ class GatewayPayloadsTest {
         assertNull(m.channelId());
         assertNull(m.referencedMessageId());
         assertFalse(m.isOwnOrBot());
+    }
+
+    // --- presence (GUILD_PRESENCES) ---
+
+    @Test
+    void guildPresencesIsTheCorrectPrivilegedBit() {
+        assertEquals(256, GatewayPayloads.INTENT_GUILD_PRESENCES);
+        assertEquals(1 << 8, GatewayPayloads.INTENT_GUILD_PRESENCES);
+    }
+
+    @Test
+    void intentsForRequestsOnlyEnabledFeatures() {
+        // Chat-only == the historical constant, so an upgrader who enables neither new feature
+        // (presence) nor disables chat sends exactly what the mod always has — no new privileged intent.
+        assertEquals(GatewayPayloads.INTENTS, GatewayPayloads.intentsFor(true, false));
+        assertEquals(33281, GatewayPayloads.intentsFor(true, false));
+        // Presence-only: GUILDS + GUILD_PRESENCES, and crucially NO Message Content.
+        assertEquals(GatewayPayloads.INTENT_GUILDS | GatewayPayloads.INTENT_GUILD_PRESENCES,
+                GatewayPayloads.intentsFor(false, true));
+        assertEquals(257, GatewayPayloads.intentsFor(false, true));
+        // Both features.
+        assertEquals(33281 | 256, GatewayPayloads.intentsFor(true, true));
+        assertEquals(33537, GatewayPayloads.intentsFor(true, true));
+        // Neither: just GUILDS (still enough to receive the GUILD_CREATE snapshot).
+        assertEquals(GatewayPayloads.INTENT_GUILDS, GatewayPayloads.intentsFor(false, false));
+    }
+
+    @Test
+    void identifyHonoursExplicitIntents() {
+        JsonObject id = parse(GatewayPayloads.identify("tok", GatewayPayloads.intentsFor(true, true)));
+        assertEquals(33537, id.getAsJsonObject("d").get("intents").getAsInt());
+        // The no-arg overload still carries the default chat intents (back-compat).
+        JsonObject def = parse(GatewayPayloads.identify("tok"));
+        assertEquals(GatewayPayloads.INTENTS, def.getAsJsonObject("d").get("intents").getAsInt());
+    }
+
+    @Test
+    void parsesPresenceUpdateFields() {
+        PresenceUpdate p = GatewayPayloads.presence(parse(
+                "{\"user\":{\"id\":\"123\"},\"status\":\"idle\",\"guild_id\":\"g\"}"));
+        assertEquals("123", p.userId());
+        assertEquals("idle", p.status());
+        assertTrue(p.isOnline());
+        assertTrue(p.hasUserId());
+    }
+
+    @Test
+    void presenceToleratesMissingUserAndStatus() {
+        PresenceUpdate p = GatewayPayloads.presence(parse("{}"));
+        assertNull(p.userId());
+        assertNull(p.status());
+        assertFalse(p.isOnline());
+        assertFalse(p.hasUserId());
+    }
+
+    @Test
+    void parsesGuildCreatePresencesSnapshotSkippingJunk() {
+        String json = "{\"presences\":["
+                + "{\"user\":{\"id\":\"1\"},\"status\":\"online\"},"
+                + "{\"user\":{\"id\":\"2\"},\"status\":\"offline\"},"
+                + "\"not-an-object\"]}";
+        List<PresenceUpdate> ps = GatewayPayloads.guildCreatePresences(parse(json));
+        assertEquals(2, ps.size()); // the non-object array entry is skipped, never throws
+        assertEquals("1", ps.get(0).userId());
+        assertTrue(ps.get(0).isOnline());
+        assertEquals("offline", ps.get(1).status());
+        assertFalse(ps.get(1).isOnline());
+    }
+
+    @Test
+    void guildCreateWithoutPresencesIsEmpty() {
+        assertTrue(GatewayPayloads.guildCreatePresences(parse("{\"id\":\"g\"}")).isEmpty());
     }
 }

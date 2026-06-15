@@ -110,6 +110,7 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.BooleanValue RELAY_GAME_TO_DISCORD;
     public static final ModConfigSpec.BooleanValue RELAY_GAME_TO_DISCORD_ENGAGED_ONLY;
     public static final ModConfigSpec.ConfigValue<List<? extends String>> GAME_RELAY_MENTIONS;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> PRESENCE_TRACK_USER_IDS;
     public static final ModConfigSpec.ConfigValue<String> DISCORD_TO_GAME_FORMAT;
     public static final ModConfigSpec.BooleanValue CREATE_THREAD_ON_JOIN;
     public static final ModConfigSpec.ConfigValue<String> THREAD_NAME_TEMPLATE;
@@ -222,6 +223,18 @@ public final class DiscordPresenceConfig {
                 .comment("Format for a relayed Discord message shown in-game.",
                          "'{user}' = the Discord author's name, '{msg}' = their message text.")
                 .define("discordToGameFormat", DEFAULT_DISCORD_TO_GAME_FORMAT);
+        PRESENCE_TRACK_USER_IDS = b
+                .comment("Discord user ids whose online presence to track, exposing a 'last seen online' query",
+                         "to bundling mods via DiscordService.lastSeenOnline(userId) / isDiscordUserOnline(userId).",
+                         "Requires the bot token AND the privileged 'PRESENCE INTENT' enabled in the Discord",
+                         "Developer Portal (Bot -> Privileged Gateway Intents). When non-empty, DP opens the gateway",
+                         "(even if relayDiscordToGame is off) and requests the GUILD_PRESENCES intent; leave EMPTY to",
+                         "request no presence intent (the default — existing two-way chat is unaffected). The bot must",
+                         "share a server with each tracked user. Each entry is a raw Discord user id, e.g.",
+                         "[\"342110421114945537\"]. NOTE: relay-mode does not track presence locally (DP holds no",
+                         "gateway there) — presence must be served by the relay; see the README.")
+                .defineListAllowEmpty("presenceTrackUserIds", () -> List.<String>of(), () -> "",
+                        o -> o instanceof String);
         CREATE_THREAD_ON_JOIN = b
                 .comment("Create one persistent Discord thread per player (anchored to their first-join",
                          "message) and route later joins, deaths and advancements into it. Requires the bot",
@@ -508,6 +521,26 @@ public final class DiscordPresenceConfig {
         }
         result.addAll(DiscordCredentials.providerGameRelayMentions());
         return result;
+    }
+
+    /**
+     * The Discord user ids to track presence for: the admin's config entries unioned with any supplied
+     * by a bundling mod's provider. A non-empty result enables presence tracking (DP requests the
+     * GUILD_PRESENCES intent and, in direct-bot mode, opens the gateway). Mirrors
+     * {@link #getGameRelayMentions()}.
+     */
+    public static List<String> getPresenceTrackUserIds() {
+        List<String> result = new ArrayList<>();
+        if (isLoaded()) {
+            result.addAll(PRESENCE_TRACK_USER_IDS.get());
+        }
+        result.addAll(DiscordCredentials.providerPresenceTrackUserIds());
+        return result;
+    }
+
+    /** Whether presence tracking is enabled (any user id configured locally or by a provider). */
+    public static boolean isPresenceTrackingEnabled() {
+        return !getPresenceTrackUserIds().isEmpty();
     }
 
     public static boolean isCreateThreadOnJoin() {
