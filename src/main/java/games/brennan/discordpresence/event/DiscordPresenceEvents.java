@@ -2,6 +2,7 @@ package games.brennan.discordpresence.event;
 
 import games.brennan.discordpresence.DiscordPresence;
 import games.brennan.discordpresence.discord.DiscordService;
+import games.brennan.discordpresence.survey.SurveyManager;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -29,6 +30,7 @@ public final class DiscordPresenceEvents {
     public static void onServerStarted(ServerStartedEvent event) {
         DiscordService service = DiscordService.get();
         service.loadThreads();                       // load the persisted player→thread map first
+        SurveyManager.get().load();                  // and the per-player survey answers
         service.onServerStarted(event.getServer());  // then open the gateway
     }
 
@@ -50,6 +52,7 @@ public final class DiscordPresenceEvents {
     public static void onDeath(LivingDeathEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             DiscordService.get().onPlayerDeath(player, event.getSource());
+            SurveyManager.get().onPlayerDeath(player); // offer the next survey question on the death screen
         }
     }
 

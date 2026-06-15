@@ -46,6 +46,9 @@ public final class DiscordPresenceConfig {
     public static final String DEFAULT_DISCONNECT_REPORT_TITLE = "👋 {player} left the game";
     public static final int DEFAULT_DISCONNECT_REPORT_EMBED_COLOR = 0x95A5A6; // muted grey (≠ death-red)
 
+    public static final boolean DEFAULT_SURVEY_ENABLED = true;
+    public static final int DEFAULT_SURVEY_EMBED_COLOR = 0x5865F2; // blue — distinct from death/disconnect
+
     public static final boolean DEFAULT_RELAY_DISCORD_TO_GAME = true;
     public static final boolean DEFAULT_RELAY_GAME_TO_DISCORD = true;
     public static final boolean DEFAULT_RELAY_GAME_TO_DISCORD_ENGAGED_ONLY = false;
@@ -136,6 +139,8 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.BooleanValue AUTO_DISCONNECT_REPORT;
     public static final ModConfigSpec.ConfigValue<String> DISCONNECT_REPORT_TITLE_TEMPLATE;
     public static final ModConfigSpec.IntValue DISCONNECT_REPORT_EMBED_COLOR;
+    public static final ModConfigSpec.BooleanValue SURVEY_ENABLED;
+    public static final ModConfigSpec.IntValue SURVEY_EMBED_COLOR;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -311,6 +316,17 @@ public final class DiscordPresenceConfig {
                 .comment("Embed colour for the disconnect report, as a decimal 0xRRGGBB value (default 0x95A5A6,",
                          "a muted grey — visually distinct from the death report's red).")
                 .defineInRange("disconnectReportEmbedColor", DEFAULT_DISCONNECT_REPORT_EMBED_COLOR, 0x000000, 0xFFFFFF);
+        SURVEY_ENABLED = b
+                .comment("Offer a one-question feedback survey on the death screen. Each death surfaces the",
+                         "player's next unanswered question (an NPS-style 0–10 rating + optional comment); the",
+                         "answer is posted to Discord via the configured webhook. Requires a webhookUrl; in",
+                         "singleplayer it also needs the one-time network confirmation. Bundling mods (e.g.",
+                         "Dungeon Train) add their own questions via the public SurveyRegistry.")
+                .define("surveyEnabled", DEFAULT_SURVEY_ENABLED);
+        SURVEY_EMBED_COLOR = b
+                .comment("Embed colour for a posted survey response, as a decimal 0xRRGGBB value (default 0x5865F2,",
+                         "a blue — visually distinct from the death and disconnect reports).")
+                .defineInRange("surveyEmbedColor", DEFAULT_SURVEY_EMBED_COLOR, 0x000000, 0xFFFFFF);
         b.pop();
 
         b.push("autoResponse");
@@ -612,5 +628,13 @@ public final class DiscordPresenceConfig {
 
     public static int getDisconnectReportEmbedColor() {
         return isLoaded() ? DISCONNECT_REPORT_EMBED_COLOR.get() : DEFAULT_DISCONNECT_REPORT_EMBED_COLOR;
+    }
+
+    public static boolean isSurveyEnabled() {
+        return isLoaded() ? SURVEY_ENABLED.get() : DEFAULT_SURVEY_ENABLED;
+    }
+
+    public static int getSurveyEmbedColor() {
+        return isLoaded() ? SURVEY_EMBED_COLOR.get() : DEFAULT_SURVEY_EMBED_COLOR;
     }
 }
