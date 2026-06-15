@@ -84,4 +84,29 @@ class DiscordPresenceConfigSeamTest {
         });
         assertFalse(DiscordPresenceConfig.isAutoDeathReport());
     }
+
+    @Test
+    void disconnectReportDefaults_whenConfigUnloaded() {
+        DiscordCredentials.register(null);
+        assertFalse(DiscordPresenceConfig.isAutoDisconnectReport()); // off by default for standalone DP
+        assertEquals(DiscordPresenceConfig.DEFAULT_DISCONNECT_REPORT_TITLE,
+                DiscordPresenceConfig.getDisconnectReportTitleTemplate());
+        assertEquals(DiscordPresenceConfig.DEFAULT_DISCONNECT_REPORT_EMBED_COLOR,
+                DiscordPresenceConfig.getDisconnectReportEmbedColor());
+    }
+
+    @Test
+    void providerCanSuppressAutoDisconnectReport() {
+        // The seam mirrors the death report. The disconnect report defaults OFF, so this is verified
+        // at the holder (the getter can't be flipped ON outside a running server / loaded config).
+        DiscordCredentials.register(null);
+        assertFalse(DiscordCredentials.providerSuppressAutoDisconnectReport());
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public boolean suppressAutoDisconnectReport() { return true; }
+        });
+        assertTrue(DiscordCredentials.providerSuppressAutoDisconnectReport());
+        assertFalse(DiscordPresenceConfig.isAutoDisconnectReport()); // suppressed → off
+    }
 }

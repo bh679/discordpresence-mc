@@ -68,6 +68,19 @@ public final class DiscordCredentials {
         }
     }
 
+    /** Whether the provider asks DP to suppress its own auto-disconnect-report; false when none / it throws. */
+    public static boolean providerSuppressAutoDisconnectReport() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return false;
+        }
+        try {
+            return current.suppressAutoDisconnectReport();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     /**
      * The provider's join-message suffix block for this player, or {@code ""} when none is
      * registered / it fails. Reuses {@link #read} for the null- and throwable-safe contract.

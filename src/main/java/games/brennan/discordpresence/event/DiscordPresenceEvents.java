@@ -41,7 +41,7 @@ public final class DiscordPresenceEvents {
     @SubscribeEvent
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            DiscordService.get().onPlayerLeave(player.getUUID());
+            DiscordService.get().onPlayerLeave(player);
         }
     }
 

@@ -69,6 +69,10 @@ chatter is ignored, and the bot's/webhook's own messages are never echoed back.
 | `joinMessageTemplate` | `🎮 **{player}** started the game` | Returning-player join line (posted into their thread). `{player}` → player name. |
 | `onlineEmoji` | `🟢` | Reaction added while online, removed on logout. |
 | `deathEmoji` | `💀` | Reaction added on death. |
+| `autoDeathReport` | `true` | Post a rich embed on death: cause, basic stats (score / location / dimension / XP) and a held/worn-gear image. |
+| `autoDisconnectReport` | `false` | Post that **same** stats embed when a player leaves **while alive** (e.g. quits to the main menu). A death→quit is *not* double-reported. Off by default; reuses the death report's image settings (`showDeathReportImage`, `deathReportIconUrlTemplate`). |
+| `disconnectReportTitleTemplate` | `👋 {player} left the game` | Disconnect report embed title. `{player}` → player name. |
+| `disconnectReportEmbedColor` | `9807270` | Disconnect report embed colour, a decimal `0xRRGGBB` value (`0x95A5A6`, a muted grey). |
 | `createThreadOnJoin` | `true` | Open one persistent thread per player (anchored to their first join). False = plain top-level join message per session. |
 | `firstJoinMessageTemplate` | `🎮 **{player}** joined the game for the first time` | Top-level anchor message on a player's first ever join. |
 | `threadNameTemplate` | `{player}` | Per-player thread name. |
@@ -129,6 +133,12 @@ exactly as before.
 > to it exactly like a Discord webhook, as long as it forwards to Discord and returns Discord's
 > response) and keep the real webhook + token server-side. Leave `botToken()` blank unless the relay
 > also fronts the bot API.
+
+**Driving your own death / disconnect report.** To show richer run stats than DP's generic ones,
+call `DiscordService.get().postDeathReport(player, title, description, fields, items)` from your own
+death *or* logout handler, and have your `DiscordCredentialsProvider` return `suppressAutoDeathReport()`
+/ `suppressAutoDisconnectReport()` so DP's built-in auto reports don't double-post. This is how
+Dungeon Train turns the disconnect report on (with its own stats) while standalone DP leaves it off.
 
 ## Build
 

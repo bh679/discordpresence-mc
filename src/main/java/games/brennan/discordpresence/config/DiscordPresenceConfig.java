@@ -41,6 +41,10 @@ public final class DiscordPresenceConfig {
     public static final String DEFAULT_DEATH_REPORT_ICON_URL_TEMPLATE =
             "https://static.minecraftitemids.com/64/{path}.png";
 
+    public static final boolean DEFAULT_AUTO_DISCONNECT_REPORT = false;
+    public static final String DEFAULT_DISCONNECT_REPORT_TITLE = "👋 {player} left the game";
+    public static final int DEFAULT_DISCONNECT_REPORT_EMBED_COLOR = 0x95A5A6; // muted grey (≠ death-red)
+
     public static final boolean DEFAULT_RELAY_DISCORD_TO_GAME = true;
     public static final boolean DEFAULT_RELAY_GAME_TO_DISCORD = true;
     public static final String DEFAULT_DISCORD_TO_GAME_FORMAT = "<{user}> {msg}";
@@ -101,6 +105,9 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.IntValue DEATH_REPORT_EMBED_COLOR;
     public static final ModConfigSpec.BooleanValue SHOW_DEATH_REPORT_IMAGE;
     public static final ModConfigSpec.ConfigValue<String> DEATH_REPORT_ICON_URL_TEMPLATE;
+    public static final ModConfigSpec.BooleanValue AUTO_DISCONNECT_REPORT;
+    public static final ModConfigSpec.ConfigValue<String> DISCONNECT_REPORT_TITLE_TEMPLATE;
+    public static final ModConfigSpec.IntValue DISCONNECT_REPORT_EMBED_COLOR;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -244,6 +251,22 @@ public final class DiscordPresenceConfig {
                          "fetched server-side and composited. The default serves rendered VANILLA item icons",
                          "only — point it at your own render host for modded items.")
                 .define("deathReportIconUrlTemplate", DEFAULT_DEATH_REPORT_ICON_URL_TEMPLATE);
+        AUTO_DISCONNECT_REPORT = b
+                .comment("Post a 'disconnect report' embed when a player leaves the game while alive (e.g. quits",
+                         "to the main menu): the SAME basic stats (score, location, dimension, XP) and held/worn",
+                         "item image as the death report, just without a death cause. A player who DIES and then",
+                         "quits is NOT double-reported — this is skipped when they leave dead. Off by default.",
+                         "When a bundling mod (e.g. Dungeon Train) drives its own richer logout report via the",
+                         "public API, set this false (or have its provider suppress it) to avoid a duplicate post.",
+                         "Reuses the death report's image settings (showDeathReportImage + deathReportIconUrlTemplate).")
+                .define("autoDisconnectReport", DEFAULT_AUTO_DISCONNECT_REPORT);
+        DISCONNECT_REPORT_TITLE_TEMPLATE = b
+                .comment("Title of the disconnect report embed. '{player}' is replaced with the player's name.")
+                .define("disconnectReportTitleTemplate", DEFAULT_DISCONNECT_REPORT_TITLE);
+        DISCONNECT_REPORT_EMBED_COLOR = b
+                .comment("Embed colour for the disconnect report, as a decimal 0xRRGGBB value (default 0x95A5A6,",
+                         "a muted grey — visually distinct from the death report's red).")
+                .defineInRange("disconnectReportEmbedColor", DEFAULT_DISCONNECT_REPORT_EMBED_COLOR, 0x000000, 0xFFFFFF);
         b.pop();
 
         b.push("autoResponse");
@@ -493,5 +516,21 @@ public final class DiscordPresenceConfig {
 
     public static String getDeathReportIconUrlTemplate() {
         return isLoaded() ? DEATH_REPORT_ICON_URL_TEMPLATE.get() : DEFAULT_DEATH_REPORT_ICON_URL_TEMPLATE;
+    }
+
+    public static boolean isAutoDisconnectReport() {
+        // A bundling mod (e.g. Dungeon Train) that posts its own logout report suppresses DP's generic one.
+        if (DiscordCredentials.providerSuppressAutoDisconnectReport()) {
+            return false;
+        }
+        return isLoaded() ? AUTO_DISCONNECT_REPORT.get() : DEFAULT_AUTO_DISCONNECT_REPORT;
+    }
+
+    public static String getDisconnectReportTitleTemplate() {
+        return isLoaded() ? DISCONNECT_REPORT_TITLE_TEMPLATE.get() : DEFAULT_DISCONNECT_REPORT_TITLE;
+    }
+
+    public static int getDisconnectReportEmbedColor() {
+        return isLoaded() ? DISCONNECT_REPORT_EMBED_COLOR.get() : DEFAULT_DISCONNECT_REPORT_EMBED_COLOR;
     }
 }

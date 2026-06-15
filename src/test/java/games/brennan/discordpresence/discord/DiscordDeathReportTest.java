@@ -92,4 +92,14 @@ class DiscordDeathReportTest {
         JsonObject embed = DiscordService.buildReportEmbed("t", "d", List.of(), 1);
         assertFalse(embed.has("fields"));
     }
+
+    // --- disconnect-report gate -------------------------------------------
+
+    @Test
+    void disconnectReportOnlyWhenEnabledAndAlive() {
+        assertTrue(DiscordService.shouldPostDisconnectReport(true, true));
+        assertFalse(DiscordService.shouldPostDisconnectReport(true, false)); // left dead → death report covers it
+        assertFalse(DiscordService.shouldPostDisconnectReport(false, true)); // feature off
+        assertFalse(DiscordService.shouldPostDisconnectReport(false, false));
+    }
 }

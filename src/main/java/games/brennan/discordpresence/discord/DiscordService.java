@@ -327,18 +327,32 @@ public final class DiscordService {
         threadFutures.put(uuid, created);
     }
 
-    public void onPlayerLeave(UUID uuid) {
+    public void onPlayerLeave(ServerPlayer player) {
+        UUID uuid = player.getUUID();
         presenceStore.markOffline(uuid); // clean logout: drop the crash-recovery record
+
+        // Clear this session's online reaction (when a session message was posted).
         CompletableFuture<DiscordMessageRef> posted = sessionMessages.remove(uuid);
-        if (posted == null) {
-            return;
+        if (posted != null) {
+            String onlineEmoji = DiscordPresenceConfig.getOnlineEmoji();
+            posted.thenAccept(ref -> {
+                if (ref != null) {
+                    DiscordBotClient.removeOwnReaction(ref, onlineEmoji);
+                }
+            });
         }
-        String onlineEmoji = DiscordPresenceConfig.getOnlineEmoji();
-        posted.thenAccept(ref -> {
-            if (ref != null) {
-                DiscordBotClient.removeOwnReaction(ref, onlineEmoji);
-            }
-        });
+
+        // Disconnect report: the SAME stats as the death report, posted when the player leaves while
+        // ALIVE (e.g. quits to the main menu). A death→title-screen quit is already covered by the
+        // death report, so it is skipped when the player leaves dead/dying (also avoids an empty-gear
+        // image, since the inventory was dropped on death). Reads game state synchronously here on the
+        // server thread; postReport snapshots it before going off-thread.
+        if (shouldPostDisconnectReport(DiscordPresenceConfig.isAutoDisconnectReport(), !player.isDeadOrDying())) {
+            String title = format(DiscordPresenceConfig.getDisconnectReportTitleTemplate(),
+                    player.getGameProfile().getName());
+            postReport(player, title, "", basicDeathFields(player), heldAndArmor(player),
+                    DiscordPresenceConfig.getDisconnectReportEmbedColor());
+        }
     }
 
     public void onPlayerDeath(ServerPlayer player, DamageSource source) {
@@ -621,12 +635,41 @@ public final class DiscordService {
      */
     public void postDeathReport(ServerPlayer player, String title, String description,
                                 List<DeathField> fields, List<ItemStack> iconItems) {
+        postReport(player, title, description, fields, iconItems,
+                DiscordPresenceConfig.getDeathReportEmbedColor());
+    }
+
+    /**
+     * Post a disconnect / "left the game" report: the same embed + composed item image as
+     * {@link #postDeathReport}, but in the disconnect colour ({@code disconnectReportEmbedColor},
+     * a muted grey) so it reads as a session summary, not a death.
+     *
+     * <p><b>Public API.</b> A bundling mod (e.g. Dungeon Train) calls this on an alive logout with
+     * the <i>same</i> run stats + item stacks it shows on death, so a player who quits to the menu
+     * gets the same summary as if they had died. Pair it with the provider's
+     * {@code suppressAutoDisconnectReport()} so DP's generic basic report doesn't also post.</p>
+     */
+    public void postDisconnectReport(ServerPlayer player, String title, String description,
+                                     List<DeathField> fields, List<ItemStack> iconItems) {
+        postReport(player, title, description, fields, iconItems,
+                DiscordPresenceConfig.getDisconnectReportEmbedColor());
+    }
+
+    /**
+     * Shared report core behind {@link #postDeathReport}, {@link #postDisconnectReport}, and the auto
+     * disconnect report ({@link #onPlayerLeave}). Builds the coloured embed, snapshots the gear icons
+     * on the calling (server) thread — so later inventory mutation / clearing can't affect the image —
+     * then composes the image and posts it (into the player's thread when they have one) off-thread.
+     * Best-effort: failures are logged and swallowed. Callers differ only in the embed {@code color}.
+     */
+    private void postReport(ServerPlayer player, String title, String description,
+                            List<DeathField> fields, List<ItemStack> iconItems, int color) {
         if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
         UUID uuid = player.getUUID();
         String name = player.getGameProfile().getName();
-        JsonObject embed = buildReportEmbed(title, description, fields, DiscordPresenceConfig.getDeathReportEmbedColor());
+        JsonObject embed = buildReportEmbed(title, description, fields, color);
         // Snapshot the icons NOW (server thread); the off-thread work below only sees URLs + counts.
         List<DeathImageComposer.IconSpec> icons =
                 DiscordPresenceConfig.isShowDeathReportImage() ? resolveIcons(iconItems) : List.of();
@@ -635,17 +678,17 @@ public final class DiscordService {
         CompletableFuture
                 .supplyAsync(() -> DeathImageComposer.compose(icons), DiscordHttp.EXECUTOR)
                 .exceptionally(t -> {
-                    LOGGER.warn("Death report image compose failed: {}", t.toString());
+                    LOGGER.warn("Report image compose failed: {}", t.toString());
                     return null;
                 })
-                .thenCompose(png -> DiscordWebhookClient.postReport(name, uuid, threadId, embed, png, "death.png"))
+                .thenCompose(png -> DiscordWebhookClient.postReport(name, uuid, threadId, embed, png, "report.png"))
                 .thenAccept(ref -> {
                     if (ref != null) {
                         reverse.put(ref.messageId(), uuid);
                     }
                 })
                 .exceptionally(t -> {
-                    LOGGER.warn("Death report post failed: {}", t.toString());
+                    LOGGER.warn("Report post failed: {}", t.toString());
                     return null;
                 });
     }
@@ -791,6 +834,15 @@ public final class DiscordService {
             return false;
         }
         return allowedNamespaces.isEmpty() || allowedNamespaces.contains(namespace);
+    }
+
+    /**
+     * Whether to post the disconnect report on logout: only when {@code enabled} and the player left
+     * while {@code alive}. A death→title-screen quit is already covered by the death report (and the
+     * inventory is empty post-death), so a dead/dying leave posts nothing here.
+     */
+    static boolean shouldPostDisconnectReport(boolean enabled, boolean alive) {
+        return enabled && alive;
     }
 
     /** Replace {@code {player}} in a template. */
