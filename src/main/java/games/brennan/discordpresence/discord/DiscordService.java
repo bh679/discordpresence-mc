@@ -22,14 +22,18 @@ import org.slf4j.Logger;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -69,6 +73,7 @@ public final class DiscordService {
     private static final int MAX_RELAY_CHARS = 256;
     private static final String THREAD_STORE_FILE = "discordpresence-threads.json";
     private static final String AUTO_RESPONSE_STORE_FILE = "discordpresence-autoresponse.json";
+    private static final String PRESENCE_STORE_FILE = "discordpresence-presence.json";
 
     private static final DiscordService INSTANCE = new DiscordService();
 
@@ -77,6 +82,10 @@ public final class DiscordService {
     }
 
     private final DiscordThreadStore threadStore = new DiscordThreadStore();
+
+    /** Durable record of who currently carries the online reaction, for crash-safe cleanup. */
+    private final OnlinePresenceStore presenceStore = new OnlinePresenceStore();
+
     private final ConcurrentHashMap<UUID, CompletableFuture<DiscordMessageRef>> sessionMessages =
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, CompletableFuture<String>> threadFutures =
@@ -93,6 +102,9 @@ public final class DiscordService {
 
     private volatile MinecraftServer server;
     private volatile GatewayConnection gateway;
+
+    /** The recurring online-reaction refresh/reconcile task, cancelled on server stop. */
+    private volatile ScheduledFuture<?> presenceTask;
 
     private DiscordService() {}
 
@@ -132,6 +144,7 @@ public final class DiscordService {
                 startedServer.isDedicatedServer(), enabled(),
                 DiscordPresenceClientConfig.getConsent(), DiscordPresenceConfig.isRelayDiscordToGame(),
                 !DiscordPresenceConfig.getBotToken().isBlank());
+        startPresenceTracking(startedServer);
         if (!enabled() || !networkAllowed(startedServer) || !DiscordPresenceConfig.isRelayDiscordToGame()) {
             return;
         }
@@ -152,6 +165,94 @@ public final class DiscordService {
         gw.start();
     }
 
+    // --- online-reaction heartbeat ---
+
+    /**
+     * Load the persisted online presence and start the reaction heartbeat. The immediate
+     * reconcile pass runs while no players are connected yet, so any green reaction left by a
+     * crashed prior session is cleared; the recurring task then refreshes it while players are
+     * online and removes it when they are not. Independent of the inbound-relay gating — it only
+     * needs reactions to be in use.
+     */
+    private void startPresenceTracking(MinecraftServer srv) {
+        presenceStore.load(FMLPaths.CONFIGDIR.get().resolve(PRESENCE_STORE_FILE));
+        if (!enabled() || !networkAllowed(srv)
+                || DiscordPresenceConfig.getOnlineEmoji().isBlank() || DiscordHttp.botUnavailable()) {
+            return; // reactions not in use (no emoji / no bot) → nothing to refresh or clean up
+        }
+        reconcilePresence(); // crash-recovery: no one is connected yet, so stale greens are removed
+        int minutes = DiscordPresenceConfig.getOnlineReactionRefreshMinutes();
+        if (minutes > 0) {
+            presenceTask = DiscordHttp.SCHEDULER.scheduleAtFixedRate(
+                    this::reconcilePresence, minutes, minutes, TimeUnit.MINUTES);
+        }
+    }
+
+    /**
+     * Reconcile the persisted online presence against who is actually connected. The connected
+     * set <i>and</i> the presence snapshot are captured together on the server thread (the player
+     * list is server-thread-only) so they are a consistent pair, then the Discord I/O runs off the
+     * server thread. Best-effort.
+     */
+    private void reconcilePresence() {
+        MinecraftServer srv = server;
+        if (srv == null || presenceStore.isEmpty() || DiscordPresenceConfig.getOnlineEmoji().isBlank()) {
+            return;
+        }
+        try {
+            srv.execute(() -> {
+                Set<UUID> connected = new HashSet<>();
+                for (ServerPlayer p : srv.getPlayerList().getPlayers()) {
+                    connected.add(p.getUUID());
+                }
+                Map<UUID, OnlinePresenceStore.PresenceEntry> snapshot = presenceStore.entries();
+                long now = System.currentTimeMillis();
+                DiscordHttp.EXECUTOR.execute(() -> applyReconcile(connected, snapshot, now));
+            });
+        } catch (Exception e) {
+            LOGGER.debug("Discord Presence: presence reconcile skipped: {}", e.toString());
+        }
+    }
+
+    /**
+     * Off-thread half of {@link #reconcilePresence}: for the consistent ({@code connected},
+     * {@code snapshot}) pair, refresh the green reaction + {@code lastSeen} for those still online,
+     * and remove a now-stale reaction + drop the entry for anyone who is not — then persist. A
+     * player who reconnected after the snapshot keeps their fresh entry ({@code dropStale} only
+     * removes unchanged entries), so the next heartbeat re-asserts their reaction.
+     */
+    private void applyReconcile(Set<UUID> connected, Map<UUID, OnlinePresenceStore.PresenceEntry> snapshot, long now) {
+        String emoji = DiscordPresenceConfig.getOnlineEmoji();
+        if (emoji.isBlank()) {
+            return;
+        }
+        List<UUID> online = new ArrayList<>();
+        Map<UUID, OnlinePresenceStore.PresenceEntry> stale = new HashMap<>();
+        for (Map.Entry<UUID, OnlinePresenceStore.PresenceEntry> e : snapshot.entrySet()) {
+            UUID uuid = e.getKey();
+            DiscordMessageRef ref = e.getValue().ref();
+            if (connected.contains(uuid)) {
+                DiscordBotClient.addReaction(ref, emoji); // idempotent — heals a join reaction that failed to post
+                online.add(uuid);
+            } else {
+                DiscordBotClient.removeOwnReaction(ref, emoji); // stale → no longer online
+                stale.put(uuid, e.getValue());
+                LOGGER.info("Discord Presence: cleared stale online reaction for {} (last seen {}).",
+                        uuid, ageDescription(e.getValue().lastSeen(), now));
+            }
+        }
+        presenceStore.touch(online, now);
+        presenceStore.dropStale(stale);
+    }
+
+    /** Human-readable "Nm ago" for a lastSeen epoch-millis, or "unknown" when never recorded. */
+    private static String ageDescription(long lastSeen, long now) {
+        if (lastSeen <= 0) {
+            return "unknown";
+        }
+        return Math.max(0, (now - lastSeen) / 60_000L) + "m ago";
+    }
+
     // --- player events ---
 
     public void onPlayerJoin(ServerPlayer player) {
@@ -165,7 +266,8 @@ public final class DiscordService {
         if (!DiscordPresenceConfig.isCreateThreadOnJoin()) {
             // Threads disabled: plain per-session top-level message + reactions (v0.1.0 behaviour).
             JoinMessage jm = joinMessage(DiscordPresenceConfig.getJoinMessageTemplate(), uuid, name);
-            sessionMessages.put(uuid, trackForReplies(postAndReact(jm.content(), name, uuid, null, onlineEmoji, jm.allowedUserIds()), uuid));
+            sessionMessages.put(uuid, recordOnlineWhenReady(
+                    trackForReplies(postAndReact(jm.content(), name, uuid, null, onlineEmoji, jm.allowedUserIds()), uuid), uuid));
             return;
         }
 
@@ -182,12 +284,12 @@ public final class DiscordService {
             JoinMessage jm = joinMessage(DiscordPresenceConfig.getJoinMessageTemplate(), uuid, name);
             trackForReplies(DiscordWebhookClient.post(jm.content(), name, uuid, threadId, jm.allowedUserIds()), uuid);
 
-            sessionMessages.put(uuid, anchorRef(uuid, stored).thenApply(anchor -> {
+            sessionMessages.put(uuid, recordOnlineWhenReady(anchorRef(uuid, stored).thenApply(anchor -> {
                 if (anchor != null) {
                     DiscordBotClient.addReaction(anchor, onlineEmoji);
                 }
                 return anchor;
-            }));
+            }), uuid));
             return;
         }
 
@@ -197,13 +299,13 @@ public final class DiscordService {
         CompletableFuture<DiscordMessageRef> anchor =
                 DiscordWebhookClient.post(jm.content(), name, uuid, null, jm.allowedUserIds());
 
-        sessionMessages.put(uuid, anchor.thenApply(ref -> {
+        sessionMessages.put(uuid, recordOnlineWhenReady(anchor.thenApply(ref -> {
             if (ref != null) {
                 DiscordBotClient.addReaction(ref, onlineEmoji);
                 reverse.put(ref.messageId(), uuid);
             }
             return ref;
-        }));
+        }), uuid));
 
         String threadName = format(DiscordPresenceConfig.getThreadNameTemplate(), name);
         int autoArchive = DiscordPresenceConfig.getThreadAutoArchiveMinutes();
@@ -226,6 +328,7 @@ public final class DiscordService {
     }
 
     public void onPlayerLeave(UUID uuid) {
+        presenceStore.markOffline(uuid); // clean logout: drop the crash-recovery record
         CompletableFuture<DiscordMessageRef> posted = sessionMessages.remove(uuid);
         if (posted == null) {
             return;
@@ -534,8 +637,13 @@ public final class DiscordService {
         return List.of(new DeathField(DiscordPresenceConfig.getAdvancementRequirementsLabel(), reqs));
     }
 
-    /** Drop per-session tracking + close the gateway on server stop (the durable store stays on disk). */
+    /** Drop per-session tracking + close the gateway on server stop (the durable stores stay on disk). */
     public void clearAll() {
+        ScheduledFuture<?> pt = presenceTask;
+        presenceTask = null;
+        if (pt != null) {
+            pt.cancel(false); // stop the heartbeat; the presence store stays for startup crash-recovery
+        }
         GatewayConnection gw = gateway;
         gateway = null;
         if (gw != null) {
@@ -673,6 +781,21 @@ public final class DiscordService {
         return future.thenApply(ref -> {
             if (ref != null) {
                 reverse.put(ref.messageId(), uuid);
+            }
+            return ref;
+        });
+    }
+
+    /**
+     * Persist the player as online on the reaction-bearing message once it resolves, so the
+     * green reaction can be removed after a crash even though the in-memory session is gone.
+     * Skipped when the online reaction is disabled (blank emoji).
+     */
+    private CompletableFuture<DiscordMessageRef> recordOnlineWhenReady(
+            CompletableFuture<DiscordMessageRef> future, UUID uuid) {
+        return future.thenApply(ref -> {
+            if (ref != null && !DiscordPresenceConfig.getOnlineEmoji().isBlank() && !DiscordHttp.botUnavailable()) {
+                presenceStore.recordOnline(uuid, ref, System.currentTimeMillis());
             }
             return ref;
         });
