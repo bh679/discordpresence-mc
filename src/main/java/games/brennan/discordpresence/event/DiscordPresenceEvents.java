@@ -3,10 +3,12 @@ package games.brennan.discordpresence.event;
 import games.brennan.discordpresence.DiscordPresence;
 import games.brennan.discordpresence.discord.DiscordService;
 import games.brennan.discordpresence.survey.SurveyManager;
+import games.brennan.discordpresence.survey.SurveyQuestionLoader;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.AddReloadListenerEvent;
 import net.neoforged.neoforge.event.ServerChatEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.player.AdvancementEvent;
@@ -33,6 +35,12 @@ public final class DiscordPresenceEvents {
         service.loadDiscordPresence();               // and the Discord user→last-seen presence map
         SurveyManager.get().load();                  // and the per-player survey answers
         service.onServerStarted(event.getServer());  // then open the gateway
+    }
+
+    @SubscribeEvent
+    public static void onAddReloadListeners(AddReloadListenerEvent event) {
+        // Load survey questions contributed by datapacks / bundling mods (data/<ns>/dp_surveys/*.json).
+        event.addListener(new SurveyQuestionLoader());
     }
 
     @SubscribeEvent
