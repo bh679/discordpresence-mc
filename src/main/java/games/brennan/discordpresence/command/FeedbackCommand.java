@@ -12,7 +12,7 @@ import net.minecraft.server.level.ServerPlayer;
  * The {@code /feedback} command: opens the feedback survey for the running player, in any
  * game mode. Not op-gated ({@code requires(s -> true)}); player-only, since a screen can
  * only open on a client (the console gets the vanilla "player only" error). The eligibility
- * checks live in {@link SurveyManager#openSurveyFor}.
+ * checks and "already answered" handling live in {@link SurveyManager#openSurveyFor}.
  */
 public final class FeedbackCommand {
 

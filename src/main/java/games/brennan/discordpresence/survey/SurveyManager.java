@@ -1,5 +1,6 @@
 package games.brennan.discordpresence.survey;
 
+import games.brennan.discordpresence.config.DiscordCredentials;
 import games.brennan.discordpresence.config.DiscordPresenceClientConfig;
 import games.brennan.discordpresence.config.DiscordPresenceConfig;
 import games.brennan.discordpresence.discord.DeathField;
@@ -10,9 +11,12 @@ import games.brennan.discordpresence.network.SurveyQuestionPayload;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.neoforged.fml.loading.FMLPaths;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.util.function.Predicate;
 
 /**
  * Server-side driver for the feedback survey: offers the full question bank both on every
@@ -20,20 +24,29 @@ import java.util.List;
  * Discord.
  *
  * <p>The client walks the sent questions one screen at a time, submitting each (every submit
- * posts to Discord). The survey is offered fresh on every death and whenever a player runs
- * {@code /feedback} — there is no per-player "ask once" tracking — so players can give
- * feedback as often as they like.</p>
+ * posts to Discord). The survey is offered fresh on every death and via {@code /feedback}, so
+ * a player can give feedback as often as they like. Answered questions are still tracked per
+ * player ({@link SurveyStore}) so {@link #record} can fire the survey-completed seam once a
+ * player has answered everything.</p>
  */
 public final class SurveyManager {
 
     private static final SurveyManager INSTANCE = new SurveyManager();
+    private static final String STORE_FILE = "discordpresence-surveys.json";
     private static final int MAX_COMMENT = 300;
 
     public static SurveyManager get() {
         return INSTANCE;
     }
 
+    private final SurveyStore store = new SurveyStore();
+
     private SurveyManager() {}
+
+    /** Load the persisted per-player answered-questions map on server start. */
+    public void load() {
+        store.load(FMLPaths.CONFIGDIR.get().resolve(STORE_FILE));
+    }
 
     /** On death, send the player every registered question (an empty list hides the button). */
     public void onPlayerDeath(ServerPlayer player) {
@@ -42,7 +55,8 @@ public final class SurveyManager {
     }
 
     /**
-     * Open the survey on demand for this player — the {@code /feedback} command. Pushes a
+     * Open the survey on demand for this player — the {@code /feedback} command. Always offers
+     * the full question bank (so players can give or update feedback at any time). Pushes a
      * payload that opens the screen immediately; messages the player and opens nothing only
      * when the survey can't run (disabled / no webhook / no consent).
      */
@@ -58,17 +72,21 @@ public final class SurveyManager {
         DPNetwork.sendTo(player, new SurveyOpenPayload(entries));
     }
 
-    /** Handle a submitted answer: validate and post it to Discord. */
+    /** Handle a submitted answer: validate, persist, and post it to Discord. */
     public void record(ServerPlayer player, String questionId, int score, String comment) {
         SurveyQuestion question = SurveyRegistry.byId(questionId);
         if (question == null) {
             return; // unknown id — ignore (stale client / tampering)
         }
+        UUID uuid = player.getUUID();
         if (!active(player)) {
             return; // survey disabled / no webhook / no consent
         }
+        // No "already answered" guard: the survey re-opens on every death and via /feedback, and
+        // every submit posts.
         int clamped = question.clampScore(score);
         String cleaned = sanitizeComment(comment);
+        store.markAnswered(uuid, questionId);
 
         String name = player.getGameProfile().getName();
         List<DeathField> fields = new ArrayList<>();
@@ -77,9 +95,16 @@ public final class SurveyManager {
             fields.add(new DeathField("Comment", cleaned));
         }
         DiscordService.get().postSurveyResponse(player, "📋 Feedback — " + name, question.prompt(), fields);
+
+        // If the player has now answered every question, the survey is complete — notify the
+        // bundling mod so it can react (e.g. award an advancement). Fires on each completion;
+        // the consumer is responsible for any once-only handling.
+        if (unanswered(SurveyRegistry.questions(), id -> store.hasAnswered(uuid, id)).isEmpty()) {
+            DiscordCredentials.providerOnSurveyCompleted(uuid, name);
+        }
     }
 
-    /** Every registered question as client payload entries, in ask-order. */
+    /** The full question bank as client payload entries, in ask-order. */
     private static List<SurveyQuestionPayload.Entry> allEntries() {
         return toEntries(SurveyRegistry.questions());
     }
@@ -89,6 +114,17 @@ public final class SurveyManager {
         List<SurveyQuestionPayload.Entry> out = new ArrayList<>(questions.size());
         for (SurveyQuestion q : questions) {
             out.add(new SurveyQuestionPayload.Entry(q.id(), q.prompt(), q.scaleMin(), q.scaleMax(), q.allowComment()));
+        }
+        return out;
+    }
+
+    /** Pure selection (testable): the bank questions for which {@code answered} is false, in order. */
+    static List<SurveyQuestion> unanswered(List<SurveyQuestion> bank, Predicate<String> answered) {
+        List<SurveyQuestion> out = new ArrayList<>();
+        for (SurveyQuestion q : bank) {
+            if (!answered.test(q.id())) {
+                out.add(q);
+            }
         }
         return out;
     }

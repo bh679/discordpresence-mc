@@ -33,6 +33,7 @@ public final class DiscordPresenceEvents {
         DiscordService service = DiscordService.get();
         service.loadThreads();                       // load the persisted player→thread map first
         service.loadDiscordPresence();               // and the Discord user→last-seen presence map
+        SurveyManager.get().load();                  // and the per-player survey answers
         service.onServerStarted(event.getServer());  // then open the gateway
     }
 

@@ -145,6 +145,26 @@ public final class DiscordCredentials {
         return read(p -> p.advancementMessageSuffix(playerId, advancementId));
     }
 
+    /**
+     * Notify the provider that a player has answered every outstanding survey question. No-op when
+     * no provider is registered; a thrown provider is swallowed (logged once) so it never breaks
+     * survey recording. Called on the server thread (see
+     * {@link DiscordCredentialsProvider#onSurveyCompleted(UUID, String)}).
+     */
+    public static void providerOnSurveyCompleted(UUID playerId, String playerName) {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return;
+        }
+        try {
+            current.onSurveyCompleted(playerId, playerName);
+        } catch (Throwable t) {
+            if (WARNED.compareAndSet(false, true)) {
+                LOGGER.warn("DiscordCredentialsProvider threw; ignoring (this warning is logged once).", t);
+            }
+        }
+    }
+
     /** Snapshot the volatile slot and read one field, mapping null / any throwable to {@code ""}. */
     private static String read(Function<DiscordCredentialsProvider, String> field) {
         DiscordCredentialsProvider current = provider;

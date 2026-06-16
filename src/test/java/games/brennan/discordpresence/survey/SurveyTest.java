@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -31,6 +32,17 @@ class SurveyTest {
         int before = SurveyRegistry.questions().size();
         SurveyRegistry.register(SurveyQuestion.nps(SurveyRegistry.NPS_ID, "a duplicate prompt"));
         assertEquals(before, SurveyRegistry.questions().size(), "duplicate id must not grow the bank");
+    }
+
+    @Test
+    void unansweredReturnsRemainingInOrder() {
+        SurveyQuestion a = new SurveyQuestion("test:a", "A", 0, 10, true);
+        SurveyQuestion b = new SurveyQuestion("test:b", "B", 0, 10, true);
+        List<SurveyQuestion> bank = List.of(a, b);
+
+        assertEquals(List.of(a, b), SurveyManager.unanswered(bank, id -> false));
+        assertEquals(List.of(b), SurveyManager.unanswered(bank, Set.of("test:a")::contains));
+        assertTrue(SurveyManager.unanswered(bank, Set.of("test:a", "test:b")::contains).isEmpty());
     }
 
     @Test
