@@ -184,6 +184,45 @@ final class DiscordThreadClient {
                 });
     }
 
+    /**
+     * Post a plain-text message (no embed) into the channel/thread as the bot. Used for a follow-up
+     * line below an advancement embed (e.g. a bundling mod's game-state line): posting it as the same
+     * bot author, chained immediately after the embed, makes Discord group the two under one author
+     * header, so it renders as a line directly below the embed box. {@code content}-only; never pings.
+     *
+     * @return a future of the posted message ref, or {@code null} on failure / nothing to post.
+     */
+    static CompletableFuture<DiscordMessageRef> postPlain(String channelId, String content) {
+        if (channelId == null || content == null || content.isBlank()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        if (DiscordHttp.botUnavailable()) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        JsonObject body = new JsonObject();
+        body.addProperty("content", content);
+        // Never ping anyone from bundling-mod-supplied text.
+        JsonObject allowedMentions = new JsonObject();
+        allowedMentions.add("parse", new JsonArray());
+        body.add("allowed_mentions", allowedMentions);
+
+        URI uri = URI.create(DiscordPresenceConfig.getBotApiBase() + "/channels/" + channelId + "/messages");
+
+        HttpRequest req = DiscordHttp.botRequest(uri)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
+                .build();
+
+        return DiscordHttp.CLIENT
+                .sendAsync(req, HttpResponse.BodyHandlers.ofString())
+                .thenApply(DiscordThreadClient::parseMessageRef)
+                .exceptionally(t -> {
+                    LOGGER.warn("Discord thread plain post failed: {}", t.toString());
+                    return null;
+                });
+    }
+
     private static String parseThreadId(HttpResponse<String> resp) {
         int code = resp.statusCode();
         if (code != 200 && code != 201) {

@@ -4,6 +4,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -111,5 +112,32 @@ class DiscordCredentialsTest {
             @Override public List<String> gameRelayMentions() { return List.of("@dev=<@1>"); }
         });
         assertEquals(List.of("@dev=<@1>"), DiscordCredentials.providerGameRelayMentions());
+    }
+
+    @Test
+    void advancementSuffix_defaultBlank_nullAndThrowSafe() {
+        UUID player = UUID.randomUUID();
+
+        DiscordCredentials.register(null);
+        assertEquals("", DiscordCredentials.providerAdvancementSuffix(player, "minecraft:story/root"));
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String advancementMessageSuffix(UUID id, String adv) { return null; }
+        });
+        assertEquals("", DiscordCredentials.providerAdvancementSuffix(player, "minecraft:story/root")); // null → ""
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String advancementMessageSuffix(UUID id, String adv) { throw new RuntimeException("boom"); }
+        });
+        assertEquals("", DiscordCredentials.providerAdvancementSuffix(player, "minecraft:story/root")); // throw → ""
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String advancementMessageSuffix(UUID id, String adv) { return "Carriage +1 · Difficulty Level 0"; }
+        });
+        assertEquals("Carriage +1 · Difficulty Level 0",
+                DiscordCredentials.providerAdvancementSuffix(player, "minecraft:story/root"));
     }
 }

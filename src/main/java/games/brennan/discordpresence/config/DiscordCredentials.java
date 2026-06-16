@@ -137,6 +137,14 @@ public final class DiscordCredentials {
         }
     }
 
+    /**
+     * The provider's extra advancement message-suffix line for this player / advancement, or {@code ""}
+     * when none is registered / it fails. Reuses {@link #read}'s null- and throwable-safe contract.
+     */
+    public static String providerAdvancementSuffix(UUID playerId, String advancementId) {
+        return read(p -> p.advancementMessageSuffix(playerId, advancementId));
+    }
+
     /** Snapshot the volatile slot and read one field, mapping null / any throwable to {@code ""}. */
     private static String read(Function<DiscordCredentialsProvider, String> field) {
         DiscordCredentialsProvider current = provider;
