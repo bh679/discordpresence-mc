@@ -5,7 +5,9 @@ import games.brennan.discordpresence.config.DiscordPresenceConfig;
 import games.brennan.discordpresence.discord.DeathField;
 import games.brennan.discordpresence.discord.DiscordService;
 import games.brennan.discordpresence.network.DPNetwork;
+import games.brennan.discordpresence.network.SurveyOpenPayload;
 import games.brennan.discordpresence.network.SurveyQuestionPayload;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.fml.loading.FMLPaths;
@@ -16,14 +18,14 @@ import java.util.UUID;
 import java.util.function.Predicate;
 
 /**
- * Server-side driver for the death-screen feedback survey: tracks which questions a
- * player has answered, sends their remaining (unanswered) questions on each death, and
- * posts a submitted answer to Discord.
+ * Server-side driver for the feedback survey: tracks which questions a player has answered,
+ * offers questions on death and on demand, and posts a submitted answer to Discord.
  *
- * <p>The client walks the sent questions one screen at a time, submitting each (every
- * submit posts to Discord), so the player works through all their unanswered questions
- * in one sitting. An answered question is never re-sent, and the death-screen button is
- * hidden once a player has answered everything.</p>
+ * <p>The client walks the sent questions one screen at a time, submitting each (every submit
+ * posts to Discord). The death-screen path is opportunistic — it sends only a player's
+ * unanswered questions and the death-screen button hides once they have answered everything.
+ * The {@code /feedback} command ({@link #openSurveyFor}) is always available: it sends the
+ * full question bank and lets players give or update feedback at any time.</p>
  */
 public final class SurveyManager {
 
@@ -50,6 +52,25 @@ public final class SurveyManager {
         DPNetwork.sendTo(player, new SurveyQuestionPayload(entries));
     }
 
+    /**
+     * Open the survey on demand for this player — the {@code /feedback} command. Always offers
+     * the full question bank (so players can give or update feedback at any time), unlike the
+     * death path which sends only unanswered questions. Pushes a payload that opens the screen
+     * immediately; messages the player and opens nothing only when the survey can't run
+     * (disabled / no webhook / no consent).
+     */
+    public void openSurveyFor(ServerPlayer player) {
+        if (!active(player)) {
+            player.sendSystemMessage(Component.literal("Feedback isn't available right now."));
+            return;
+        }
+        List<SurveyQuestionPayload.Entry> entries = allEntries();
+        if (entries.isEmpty()) {
+            return; // no questions configured — nothing to open
+        }
+        DPNetwork.sendTo(player, new SurveyOpenPayload(entries));
+    }
+
     /** Handle a submitted answer: validate, persist, and post it to Discord. */
     public void record(ServerPlayer player, String questionId, int score, String comment) {
         SurveyQuestion question = SurveyRegistry.byId(questionId);
@@ -57,12 +78,11 @@ public final class SurveyManager {
             return; // unknown id — ignore (stale client / tampering)
         }
         UUID uuid = player.getUUID();
-        if (store.hasAnswered(uuid, questionId)) {
-            return; // already answered — idempotent, no double post
-        }
         if (!active(player)) {
             return; // survey disabled / no webhook / no consent
         }
+        // No "already answered" guard: /feedback intentionally allows re-submitting. The
+        // death path only ever sends unanswered questions, so it never re-submits anyway.
         int clamped = question.clampScore(score);
         String cleaned = sanitizeComment(comment);
         store.markAnswered(uuid, questionId);
@@ -76,10 +96,20 @@ public final class SurveyManager {
         DiscordService.get().postSurveyResponse(player, "📋 Feedback — " + name, question.prompt(), fields);
     }
 
-    /** The player's unanswered questions as client payload entries, in ask-order. */
+    /** The player's unanswered questions as client payload entries, in ask-order (death path). */
     private List<SurveyQuestionPayload.Entry> unansweredEntries(UUID uuid) {
-        List<SurveyQuestionPayload.Entry> out = new ArrayList<>();
-        for (SurveyQuestion q : unanswered(SurveyRegistry.questions(), id -> store.hasAnswered(uuid, id))) {
+        return toEntries(unanswered(SurveyRegistry.questions(), id -> store.hasAnswered(uuid, id)));
+    }
+
+    /** The full question bank as client payload entries, in ask-order (the /feedback command). */
+    private static List<SurveyQuestionPayload.Entry> allEntries() {
+        return toEntries(SurveyRegistry.questions());
+    }
+
+    /** Map survey questions to their client-facing payload entries, preserving order. */
+    private static List<SurveyQuestionPayload.Entry> toEntries(List<SurveyQuestion> questions) {
+        List<SurveyQuestionPayload.Entry> out = new ArrayList<>(questions.size());
+        for (SurveyQuestion q : questions) {
             out.add(new SurveyQuestionPayload.Entry(q.id(), q.prompt(), q.scaleMin(), q.scaleMax(), q.allowComment()));
         }
         return out;

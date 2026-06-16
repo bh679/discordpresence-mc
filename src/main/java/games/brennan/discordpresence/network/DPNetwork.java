@@ -30,6 +30,8 @@ public final class DPNetwork {
                 .optional();
         registrar.playToClient(SurveyQuestionPayload.TYPE, SurveyQuestionPayload.STREAM_CODEC,
                 SurveyQuestionPayload::handle);
+        registrar.playToClient(SurveyOpenPayload.TYPE, SurveyOpenPayload.STREAM_CODEC,
+                SurveyOpenPayload::handle);
         registrar.playToServer(SurveySubmitPayload.TYPE, SurveySubmitPayload.STREAM_CODEC,
                 SurveySubmitPayload::handle);
     }
