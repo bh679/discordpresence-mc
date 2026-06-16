@@ -6,7 +6,7 @@ import java.util.List;
 
 /**
  * Client-only holder for the survey questions the server wants this player to answer on
- * the death screen — their unanswered set, in ask-order. Set by the
+ * the death screen, in ask-order. Set by the
  * {@link SurveyQuestionPayload} handler; read by the death-screen Feedback button
  * (visibility) and the survey screen (which questions to walk).
  */

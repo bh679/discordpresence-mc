@@ -15,7 +15,7 @@ import java.util.List;
 
 /**
  * Client-only: injects a "Give Feedback" button onto the vanilla death screen whenever
- * the server has sent this player one or more unanswered survey questions (see
+ * the server has sent this player one or more survey questions (see
  * {@link SurveyClientState}). The button opens the {@link SurveyScreen}, which walks
  * through them.
  *

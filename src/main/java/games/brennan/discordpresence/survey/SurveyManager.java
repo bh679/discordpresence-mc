@@ -8,64 +8,46 @@ import games.brennan.discordpresence.network.DPNetwork;
 import games.brennan.discordpresence.network.SurveyQuestionPayload;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.fml.loading.FMLPaths;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
-import java.util.function.Predicate;
 
 /**
- * Server-side driver for the death-screen feedback survey: tracks which questions a
- * player has answered, sends their remaining (unanswered) questions on each death, and
- * posts a submitted answer to Discord.
+ * Server-side driver for the death-screen feedback survey: on every death it sends the
+ * player the full set of registered questions, and posts each submitted answer to Discord.
  *
  * <p>The client walks the sent questions one screen at a time, submitting each (every
- * submit posts to Discord), so the player works through all their unanswered questions
- * in one sitting. An answered question is never re-sent, and the death-screen button is
- * hidden once a player has answered everything.</p>
+ * submit posts to Discord). The survey is offered fresh on every death — there is no
+ * per-player "ask once" tracking — so a player can give feedback as often as they die.</p>
  */
 public final class SurveyManager {
 
     private static final SurveyManager INSTANCE = new SurveyManager();
-    private static final String STORE_FILE = "discordpresence-surveys.json";
     private static final int MAX_COMMENT = 300;
 
     public static SurveyManager get() {
         return INSTANCE;
     }
 
-    private final SurveyStore store = new SurveyStore();
-
     private SurveyManager() {}
 
-    /** Load the persisted per-player answered-questions map on server start. */
-    public void load() {
-        store.load(FMLPaths.CONFIGDIR.get().resolve(STORE_FILE));
-    }
-
-    /** On death, send the player their unanswered questions (an empty list hides the button). */
+    /** On death, send the player every registered question (an empty list hides the button). */
     public void onPlayerDeath(ServerPlayer player) {
-        List<SurveyQuestionPayload.Entry> entries = active(player) ? unansweredEntries(player.getUUID()) : List.of();
+        List<SurveyQuestionPayload.Entry> entries = active(player) ? allEntries() : List.of();
         DPNetwork.sendTo(player, new SurveyQuestionPayload(entries));
     }
 
-    /** Handle a submitted answer: validate, persist, and post it to Discord. */
+    /** Handle a submitted answer: validate and post it to Discord. */
     public void record(ServerPlayer player, String questionId, int score, String comment) {
         SurveyQuestion question = SurveyRegistry.byId(questionId);
         if (question == null) {
             return; // unknown id — ignore (stale client / tampering)
-        }
-        UUID uuid = player.getUUID();
-        if (store.hasAnswered(uuid, questionId)) {
-            return; // already answered — idempotent, no double post
         }
         if (!active(player)) {
             return; // survey disabled / no webhook / no consent
         }
         int clamped = question.clampScore(score);
         String cleaned = sanitizeComment(comment);
-        store.markAnswered(uuid, questionId);
 
         String name = player.getGameProfile().getName();
         List<DeathField> fields = new ArrayList<>();
@@ -76,22 +58,11 @@ public final class SurveyManager {
         DiscordService.get().postSurveyResponse(player, "📋 Feedback — " + name, question.prompt(), fields);
     }
 
-    /** The player's unanswered questions as client payload entries, in ask-order. */
-    private List<SurveyQuestionPayload.Entry> unansweredEntries(UUID uuid) {
+    /** Every registered question as client payload entries, in ask-order. */
+    private static List<SurveyQuestionPayload.Entry> allEntries() {
         List<SurveyQuestionPayload.Entry> out = new ArrayList<>();
-        for (SurveyQuestion q : unanswered(SurveyRegistry.questions(), id -> store.hasAnswered(uuid, id))) {
+        for (SurveyQuestion q : SurveyRegistry.questions()) {
             out.add(new SurveyQuestionPayload.Entry(q.id(), q.prompt(), q.scaleMin(), q.scaleMax(), q.allowComment()));
-        }
-        return out;
-    }
-
-    /** Pure selection (testable): the bank questions for which {@code answered} is false, in order. */
-    static List<SurveyQuestion> unanswered(List<SurveyQuestion> bank, Predicate<String> answered) {
-        List<SurveyQuestion> out = new ArrayList<>();
-        for (SurveyQuestion q : bank) {
-            if (!answered.test(q.id())) {
-                out.add(q);
-            }
         }
         return out;
     }
