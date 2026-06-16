@@ -1,5 +1,6 @@
 package games.brennan.discordpresence.survey;
 
+import games.brennan.discordpresence.config.DiscordCredentials;
 import games.brennan.discordpresence.config.DiscordPresenceClientConfig;
 import games.brennan.discordpresence.config.DiscordPresenceConfig;
 import games.brennan.discordpresence.discord.DeathField;
@@ -74,6 +75,13 @@ public final class SurveyManager {
             fields.add(new DeathField("Comment", cleaned));
         }
         DiscordService.get().postSurveyResponse(player, "📋 Feedback — " + name, question.prompt(), fields);
+
+        // If that was the player's last outstanding question, the survey is complete — notify the
+        // bundling mod so it can react (e.g. award an advancement). Skipped questions stay
+        // outstanding, so this fires only once the player has answered everything.
+        if (unanswered(SurveyRegistry.questions(), id -> store.hasAnswered(uuid, id)).isEmpty()) {
+            DiscordCredentials.providerOnSurveyCompleted(uuid, name);
+        }
     }
 
     /** The player's unanswered questions as client payload entries, in ask-order. */
