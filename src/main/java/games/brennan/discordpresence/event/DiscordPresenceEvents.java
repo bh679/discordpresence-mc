@@ -60,7 +60,7 @@ public final class DiscordPresenceEvents {
     public static void onDeath(LivingDeathEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             DiscordService.get().onPlayerDeath(player, event.getSource());
-            SurveyManager.get().onPlayerDeath(player); // offer the next survey question on the death screen
+            SurveyManager.get().onPlayerDeath(player); // offer the feedback survey on the death screen
         }
     }
 

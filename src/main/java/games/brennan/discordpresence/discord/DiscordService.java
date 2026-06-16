@@ -682,10 +682,18 @@ public final class DiscordService {
                 DiscordPresenceConfig.getAdvancementMessageTemplate(),
                 player.getGameProfile().getName(), title);
         List<DeathField> fields = advancementFields(holder, description);
+        // A bundling mod may contribute a plain-text game-state line (Dungeon Train: the earning
+        // player's carriage # + difficulty level). It posts as a SEPARATE bot message chained after the
+        // embed, so it lands on its own line BELOW the embed box — Discord groups it under the same bot
+        // author. Resolved on the server thread, before the async post.
+        String stateSuffix = DiscordCredentials.providerAdvancementSuffix(uuid, holder.id().toString());
 
         threadFuture.thenAccept(threadId -> {
             if (threadId != null) {
-                DiscordThreadClient.postEmbed(threadId, content, title, description, color, iconUrl, fields);
+                var embedPost = DiscordThreadClient.postEmbed(threadId, content, title, description, color, iconUrl, fields);
+                if (!stateSuffix.isBlank()) {
+                    embedPost.thenRun(() -> DiscordThreadClient.postPlain(threadId, stateSuffix));
+                }
             }
         });
     }

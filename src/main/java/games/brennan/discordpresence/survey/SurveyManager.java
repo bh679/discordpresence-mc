@@ -5,7 +5,9 @@ import games.brennan.discordpresence.config.DiscordPresenceConfig;
 import games.brennan.discordpresence.discord.DeathField;
 import games.brennan.discordpresence.discord.DiscordService;
 import games.brennan.discordpresence.network.DPNetwork;
+import games.brennan.discordpresence.network.SurveyOpenPayload;
 import games.brennan.discordpresence.network.SurveyQuestionPayload;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -13,12 +15,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Server-side driver for the death-screen feedback survey: on every death it sends the
- * player the full set of registered questions, and posts each submitted answer to Discord.
+ * Server-side driver for the feedback survey: offers the full question bank both on every
+ * death and on demand (the {@code /feedback} command), and posts each submitted answer to
+ * Discord.
  *
- * <p>The client walks the sent questions one screen at a time, submitting each (every
- * submit posts to Discord). The survey is offered fresh on every death — there is no
- * per-player "ask once" tracking — so a player can give feedback as often as they die.</p>
+ * <p>The client walks the sent questions one screen at a time, submitting each (every submit
+ * posts to Discord). The survey is offered fresh on every death and whenever a player runs
+ * {@code /feedback} — there is no per-player "ask once" tracking — so players can give
+ * feedback as often as they like.</p>
  */
 public final class SurveyManager {
 
@@ -35,6 +39,23 @@ public final class SurveyManager {
     public void onPlayerDeath(ServerPlayer player) {
         List<SurveyQuestionPayload.Entry> entries = active(player) ? allEntries() : List.of();
         DPNetwork.sendTo(player, new SurveyQuestionPayload(entries));
+    }
+
+    /**
+     * Open the survey on demand for this player — the {@code /feedback} command. Pushes a
+     * payload that opens the screen immediately; messages the player and opens nothing only
+     * when the survey can't run (disabled / no webhook / no consent).
+     */
+    public void openSurveyFor(ServerPlayer player) {
+        if (!active(player)) {
+            player.sendSystemMessage(Component.literal("Feedback isn't available right now."));
+            return;
+        }
+        List<SurveyQuestionPayload.Entry> entries = allEntries();
+        if (entries.isEmpty()) {
+            return; // no questions configured — nothing to open
+        }
+        DPNetwork.sendTo(player, new SurveyOpenPayload(entries));
     }
 
     /** Handle a submitted answer: validate and post it to Discord. */
@@ -60,8 +81,13 @@ public final class SurveyManager {
 
     /** Every registered question as client payload entries, in ask-order. */
     private static List<SurveyQuestionPayload.Entry> allEntries() {
-        List<SurveyQuestionPayload.Entry> out = new ArrayList<>();
-        for (SurveyQuestion q : SurveyRegistry.questions()) {
+        return toEntries(SurveyRegistry.questions());
+    }
+
+    /** Map survey questions to their client-facing payload entries, preserving order. */
+    private static List<SurveyQuestionPayload.Entry> toEntries(List<SurveyQuestion> questions) {
+        List<SurveyQuestionPayload.Entry> out = new ArrayList<>(questions.size());
+        for (SurveyQuestion q : questions) {
             out.add(new SurveyQuestionPayload.Entry(q.id(), q.prompt(), q.scaleMin(), q.scaleMax(), q.allowComment()));
         }
         return out;
