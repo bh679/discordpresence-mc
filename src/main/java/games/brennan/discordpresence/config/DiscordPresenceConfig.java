@@ -330,9 +330,9 @@ public final class DiscordPresenceConfig {
                          "a muted grey — visually distinct from the death report's red).")
                 .defineInRange("disconnectReportEmbedColor", DEFAULT_DISCONNECT_REPORT_EMBED_COLOR, 0x000000, 0xFFFFFF);
         SURVEY_ENABLED = b
-                .comment("Offer a one-question feedback survey on the death screen. Each death surfaces the",
-                         "player's next unanswered question (an NPS-style 0–10 rating + optional comment); the",
-                         "answer is posted to Discord via the configured webhook. Requires a webhookUrl; in",
+                .comment("Offer a feedback survey on the death screen. Every death surfaces the survey",
+                         "question(s) (an NPS-style 0–10 rating + optional comment); each submitted answer",
+                         "is posted to Discord via the configured webhook. Requires a webhookUrl; in",
                          "singleplayer it also needs the one-time network confirmation. Bundling mods (e.g.",
                          "Dungeon Train) add their own questions via the public SurveyRegistry.")
                 .define("surveyEnabled", DEFAULT_SURVEY_ENABLED);

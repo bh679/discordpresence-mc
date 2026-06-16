@@ -13,15 +13,16 @@ import net.minecraft.util.FormattedCharSequence;
 import java.util.List;
 
 /**
- * The feedback survey window: walks the player's unanswered questions one screen at a
+ * The feedback survey window: walks the survey questions one screen at a
  * time. Each question is a 0–N rating + an optional comment; Submit sends the answer to
- * the server (which posts it to Discord) and advances to the next question; Skip advances
- * without recording (re-offered next death). After the last question the screen closes
- * back to the death screen.
+ * the server (which posts it to Discord) and advances to the next question. After the last
+ * question the screen closes back to the death screen. Closing early (Esc) just returns to
+ * the death screen; the survey is offered again on the next death.
  */
 public final class SurveyScreen extends Screen {
 
     private static final int CONTENT_WIDTH = 280;
+    private static final int SUBMIT_W = 150; // centered, not full content width
     private static final int SCORE_GAP = 2;
     private static final int SCORE_H = 20;
     private static final int SELECT_COLOR = 0xFF55FF55;
@@ -85,17 +86,13 @@ public final class SurveyScreen extends Screen {
             commentBox = null;
         }
 
-        // Submit (+ advance) + Skip.
-        int btnW = (CONTENT_WIDTH - 8) / 2;
+        // Submit (+ advance) — centered, fixed width; selecting a score enables it.
         boolean last = index == questions.size() - 1;
         submitButton = Button.builder(Component.literal(last ? "Submit" : "Submit & next"), b -> submit())
-                .bounds(left, y, btnW, 20)
+                .bounds(centerX - SUBMIT_W / 2, y, SUBMIT_W, 20)
                 .build();
         submitButton.active = false;
         addRenderableWidget(submitButton);
-        addRenderableWidget(Button.builder(Component.literal("Skip"), b -> skip())
-                .bounds(left + btnW + 8, y, btnW, 20)
-                .build());
     }
 
     private int promptTop() {
@@ -114,10 +111,6 @@ public final class SurveyScreen extends Screen {
         SurveyQuestionPayload.Entry q = current();
         String comment = commentBox == null ? "" : commentBox.getValue().trim();
         DPNetwork.sendToServer(new SurveySubmitPayload(q.id(), selectedScore, comment));
-        advance();
-    }
-
-    private void skip() {
         advance();
     }
 

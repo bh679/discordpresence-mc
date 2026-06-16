@@ -19,14 +19,15 @@ import java.util.UUID;
 import java.util.function.Predicate;
 
 /**
- * Server-side driver for the feedback survey: tracks which questions a player has answered,
- * offers questions on death and on demand, and posts a submitted answer to Discord.
+ * Server-side driver for the feedback survey: offers the full question bank both on every
+ * death and on demand (the {@code /feedback} command), and posts each submitted answer to
+ * Discord.
  *
  * <p>The client walks the sent questions one screen at a time, submitting each (every submit
- * posts to Discord). The death-screen path is opportunistic — it sends only a player's
- * unanswered questions and the death-screen button hides once they have answered everything.
- * The {@code /feedback} command ({@link #openSurveyFor}) is always available: it sends the
- * full question bank and lets players give or update feedback at any time.</p>
+ * posts to Discord). The survey is offered fresh on every death and via {@code /feedback}, so
+ * a player can give feedback as often as they like. Answered questions are still tracked per
+ * player ({@link SurveyStore}) so {@link #record} can fire the survey-completed seam once a
+ * player has answered everything.</p>
  */
 public final class SurveyManager {
 
@@ -47,18 +48,17 @@ public final class SurveyManager {
         store.load(FMLPaths.CONFIGDIR.get().resolve(STORE_FILE));
     }
 
-    /** On death, send the player their unanswered questions (an empty list hides the button). */
+    /** On death, send the player every registered question (an empty list hides the button). */
     public void onPlayerDeath(ServerPlayer player) {
-        List<SurveyQuestionPayload.Entry> entries = active(player) ? unansweredEntries(player.getUUID()) : List.of();
+        List<SurveyQuestionPayload.Entry> entries = active(player) ? allEntries() : List.of();
         DPNetwork.sendTo(player, new SurveyQuestionPayload(entries));
     }
 
     /**
      * Open the survey on demand for this player — the {@code /feedback} command. Always offers
-     * the full question bank (so players can give or update feedback at any time), unlike the
-     * death path which sends only unanswered questions. Pushes a payload that opens the screen
-     * immediately; messages the player and opens nothing only when the survey can't run
-     * (disabled / no webhook / no consent).
+     * the full question bank (so players can give or update feedback at any time). Pushes a
+     * payload that opens the screen immediately; messages the player and opens nothing only
+     * when the survey can't run (disabled / no webhook / no consent).
      */
     public void openSurveyFor(ServerPlayer player) {
         if (!active(player)) {
@@ -82,8 +82,8 @@ public final class SurveyManager {
         if (!active(player)) {
             return; // survey disabled / no webhook / no consent
         }
-        // No "already answered" guard: /feedback intentionally allows re-submitting. The
-        // death path only ever sends unanswered questions, so it never re-submits anyway.
+        // No "already answered" guard: the survey re-opens on every death and via /feedback, and
+        // every submit posts.
         int clamped = question.clampScore(score);
         String cleaned = sanitizeComment(comment);
         store.markAnswered(uuid, questionId);
@@ -96,20 +96,15 @@ public final class SurveyManager {
         }
         DiscordService.get().postSurveyResponse(player, "📋 Feedback — " + name, question.prompt(), fields);
 
-        // If that was the player's last outstanding question, the survey is complete — notify the
-        // bundling mod so it can react (e.g. award an advancement). Skipped questions stay
-        // outstanding, so this fires only once the player has answered everything.
+        // If the player has now answered every question, the survey is complete — notify the
+        // bundling mod so it can react (e.g. award an advancement). Fires on each completion;
+        // the consumer is responsible for any once-only handling.
         if (unanswered(SurveyRegistry.questions(), id -> store.hasAnswered(uuid, id)).isEmpty()) {
             DiscordCredentials.providerOnSurveyCompleted(uuid, name);
         }
     }
 
-    /** The player's unanswered questions as client payload entries, in ask-order (death path). */
-    private List<SurveyQuestionPayload.Entry> unansweredEntries(UUID uuid) {
-        return toEntries(unanswered(SurveyRegistry.questions(), id -> store.hasAnswered(uuid, id)));
-    }
-
-    /** The full question bank as client payload entries, in ask-order (the /feedback command). */
+    /** The full question bank as client payload entries, in ask-order. */
     private static List<SurveyQuestionPayload.Entry> allEntries() {
         return toEntries(SurveyRegistry.questions());
     }
