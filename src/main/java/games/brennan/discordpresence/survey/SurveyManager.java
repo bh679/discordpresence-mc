@@ -5,7 +5,9 @@ import games.brennan.discordpresence.config.DiscordPresenceConfig;
 import games.brennan.discordpresence.discord.DeathField;
 import games.brennan.discordpresence.discord.DiscordService;
 import games.brennan.discordpresence.network.DPNetwork;
+import games.brennan.discordpresence.network.SurveyOpenPayload;
 import games.brennan.discordpresence.network.SurveyQuestionPayload;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.fml.loading.FMLPaths;
@@ -48,6 +50,25 @@ public final class SurveyManager {
     public void onPlayerDeath(ServerPlayer player) {
         List<SurveyQuestionPayload.Entry> entries = active(player) ? unansweredEntries(player.getUUID()) : List.of();
         DPNetwork.sendTo(player, new SurveyQuestionPayload(entries));
+    }
+
+    /**
+     * Open the survey on demand for this player — the {@code /feedback} command. Unlike the
+     * death path (which only caches questions for the death-screen button), this pushes a
+     * payload that opens the screen immediately. Sends a chat message and opens nothing if
+     * the survey can't run or the player has already answered everything.
+     */
+    public void openSurveyFor(ServerPlayer player) {
+        if (!active(player)) {
+            player.sendSystemMessage(Component.literal("Feedback isn't available right now."));
+            return;
+        }
+        List<SurveyQuestionPayload.Entry> entries = unansweredEntries(player.getUUID());
+        if (entries.isEmpty()) {
+            player.sendSystemMessage(Component.literal("You've already shared all your feedback — thank you!"));
+            return;
+        }
+        DPNetwork.sendTo(player, new SurveyOpenPayload(entries));
     }
 
     /** Handle a submitted answer: validate, persist, and post it to Discord. */
