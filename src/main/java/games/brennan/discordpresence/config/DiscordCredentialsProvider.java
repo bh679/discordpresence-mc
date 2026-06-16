@@ -111,4 +111,17 @@ public interface DiscordCredentialsProvider {
     default List<String> presenceTrackUserIds() {
         return List.of();
     }
+
+    /**
+     * Optional plain-text game-state line for an advancement announcement — e.g. a bundling mod's
+     * context (Dungeon Train adds the earning player's carriage # and difficulty level). DP renders it
+     * as a separate bot message chained immediately after the embed, so it appears on its own line
+     * <i>below</i> the embed box. Called on the server thread, so an implementation may read live game
+     * state. {@code ""}/{@code null} = nothing added; standalone DP leaves advancement messages
+     * unchanged. The arguments identify the earning player and the advancement id so a provider can
+     * vary the line per player / per advancement.
+     */
+    default String advancementMessageSuffix(UUID playerId, String advancementId) {
+        return "";
+    }
 }
