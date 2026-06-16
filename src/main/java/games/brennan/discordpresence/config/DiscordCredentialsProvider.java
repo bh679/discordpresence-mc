@@ -124,4 +124,16 @@ public interface DiscordCredentialsProvider {
     default String advancementMessageSuffix(UUID playerId, String advancementId) {
         return "";
     }
+
+    /**
+     * Called once a player has answered <i>all</i> their outstanding death-screen survey questions
+     * (i.e. none remain unanswered). Invoked on the server thread right after the final answer is
+     * persisted, so an implementation may read or modify live game state — e.g. a bundling mod
+     * awarding an advancement for completing the feedback survey. Skipped questions stay
+     * outstanding, so this fires only when the player has genuinely answered everything; it may
+     * fire again on a later death once new questions are added and then answered. Default does
+     * nothing. Like the other seams it MUST NOT throw (a thrown exception is swallowed).
+     */
+    default void onSurveyCompleted(UUID playerId, String playerName) {
+    }
 }
