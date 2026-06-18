@@ -113,6 +113,34 @@ webhook URL + bot token do **not** carry over to a fresh branch worktree — liv
 silently disabled (a blank webhook turns the mod off) until they are present. The secrets live only
 in the runtime SERVER config and are **never committed**.
 
+**Keep test traffic out of the live channel — `DISCORDPRESENCE_DEV_WEBHOOK_URL`.** Local runs would
+otherwise post the test player's joins / deaths / surveys into the *live* webhook copied from main.
+To send them to a throwaway dev channel instead, create a `#minecraft-dev` channel **in the same
+Discord guild as the bot** (Server Settings → Integrations → Webhooks → New Webhook → pick the
+channel → Copy URL), then export that webhook before launching the run:
+
+```bash
+export DISCORDPRESENCE_DEV_WEBHOOK_URL='https://discord.com/api/webhooks/XXX/YYY'
+./gradlew runClient    # or runServer
+```
+
+When set, this overrides the webhook for **all** posts and forces direct-to-Discord mode, so the
+reactions / per-player threads (which reuse the bot token from the copied config) also land in the
+dev channel — nothing touches the live one. Unset it (or use a fresh shell) to fall back to the live
+webhook. Set it **only in dev shells, never in production** — there it would hijack the live webhook.
+
+One-time when switching an *existing* worktree over: the persistent stores
+(`run/config/discordpresence-*.json`) are keyed to the old channel's message IDs, so clear them once
+so first-join recreates the thread + reactions in the dev channel (a brand-new worktree starts empty
+— nothing to do):
+
+```bash
+rm -f run/config/discordpresence-threads.json run/config/discordpresence-presence.json
+```
+
+You still copy the SERVER config from main (below) to get the **bot token** and the rest of the
+settings — the env var only swaps the webhook destination.
+
 When starting a new branch/worktree, copy the configured SERVER config from the main checkout
 (run from the new worktree root):
 
@@ -142,7 +170,7 @@ comment/format normalization and it **preserves** the secret values.
 ### Manual Discord Testing
 
 For Gate 2 verification:
-1. Ensure the gitignored SERVER config has the secrets — `run/config/discordpresence-server.toml` (copy it from main via [Worktree / branch setup](#worktree--branch-setup--discord-secrets) above, or add `webhookUrl` / `botToken` by hand)
+1. Ensure the gitignored SERVER config has the secrets — `run/config/discordpresence-server.toml` (copy it from main via [Worktree / branch setup](#worktree--branch-setup--discord-secrets) above, or add `webhookUrl` / `botToken` by hand). To avoid posting into your live channel, set `DISCORDPRESENCE_DEV_WEBHOOK_URL` first (see [Worktree / branch setup](#worktree--branch-setup--discord-secrets)).
 2. `./gradlew runServer` (or `runClient`) — wait for it to start
 3. Join → confirm the join message + online reaction post to Discord; quit → confirm the online reaction clears; die → confirm the death reaction
 4. Discord is **best-effort**: failures are logged and swallowed, so check the server log for `discordpresence` warnings if nothing appears
