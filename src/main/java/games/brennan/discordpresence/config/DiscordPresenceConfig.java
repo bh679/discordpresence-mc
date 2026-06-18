@@ -21,6 +21,17 @@ import java.util.List;
  */
 public final class DiscordPresenceConfig {
 
+    /**
+     * Developer-only override env var. When this is set to a non-blank webhook URL, it becomes the
+     * effective webhook for ALL posts (joins, deaths, survey, chat relay), overriding the relay,
+     * a bundling mod's provider, and the {@code webhookUrl} config — and forces DP into direct
+     * (non-relay) mode so reactions/threads land in the same channel as the messages. Intended for
+     * keeping {@code ./gradlew runClient}/{@code runServer} test traffic in a throwaway dev channel
+     * instead of the live one. Unset → byte-for-byte normal resolution. Set it only in dev shells;
+     * NEVER in production (it would hijack the live webhook).
+     */
+    public static final String DEV_WEBHOOK_ENV = "DISCORDPRESENCE_DEV_WEBHOOK_URL";
+
     public static final String DEFAULT_JOIN_TEMPLATE = "🎮 **{player}** started the game";
     public static final String DEFAULT_FIRST_JOIN_TEMPLATE = "🎮 **{player}** joined the game for the first time";
     public static final String DEFAULT_ONLINE_EMOJI = "🟢"; // 🟢
@@ -415,15 +426,52 @@ public final class DiscordPresenceConfig {
     private static final CredentialResolver.Policy CREDENTIAL_POLICY =
             CredentialResolver.Policy.PROVIDER_WINS;
 
+    /** Raw {@link #DEV_WEBHOOK_ENV} value (null-safe); blank/whitespace is treated as unset by the helpers. */
+    static String devWebhookOverride() {
+        String value = System.getenv(DEV_WEBHOOK_ENV);
+        return value == null ? "" : value;
+    }
+
+    /**
+     * Pure relay-base resolution. A non-blank dev override forces direct-to-Discord mode (returns
+     * {@code ""}) so reactions/threads can't split to a prod relay; otherwise the config↔provider
+     * value with any trailing slash stripped. No env / no NeoForge — fully unit-testable.
+     */
+    static String resolveRelayBaseUrl(String devWebhookOverride, String configRelay, String providerRelay,
+                                      CredentialResolver.Policy policy) {
+        if (devWebhookOverride != null && !devWebhookOverride.isBlank()) {
+            return "";
+        }
+        String resolved = CredentialResolver.resolve(configRelay, providerRelay, policy);
+        return resolved.endsWith("/") ? resolved.substring(0, resolved.length() - 1) : resolved;
+    }
+
+    /**
+     * Pure webhook resolution. A non-blank dev override wins over everything (trimmed); else the
+     * relay's {@code <base>/hook} when in relay-mode; else the config↔provider webhook. No env /
+     * no NeoForge — fully unit-testable.
+     */
+    static String resolveWebhookUrl(String devWebhookOverride, String relayBaseUrl, String configWebhook,
+                                    String providerWebhook, CredentialResolver.Policy policy) {
+        if (devWebhookOverride != null && !devWebhookOverride.isBlank()) {
+            return devWebhookOverride.trim();
+        }
+        if (relayBaseUrl != null && !relayBaseUrl.isBlank()) {
+            return relayBaseUrl + "/hook";
+        }
+        return CredentialResolver.resolve(configWebhook, providerWebhook, policy);
+    }
+
     /**
      * Resolved relay base URL, or {@code ""} for direct-to-Discord. When non-blank, DP is in
      * RELAY-MODE: it routes webhook + bot REST through the relay and sends no bot token. Any
      * trailing slash is stripped so derived paths are {@code <base>/hook}, not {@code <base>//hook}.
+     * A dev override via {@link #DEV_WEBHOOK_ENV} forces this to {@code ""} (direct mode).
      */
     public static String getRelayBaseUrl() {
         String configValue = isLoaded() ? RELAY_BASE_URL.get() : "";
-        String resolved = CredentialResolver.resolve(configValue, DiscordCredentials.providerRelayBaseUrl(), CREDENTIAL_POLICY);
-        return resolved.endsWith("/") ? resolved.substring(0, resolved.length() - 1) : resolved;
+        return resolveRelayBaseUrl(devWebhookOverride(), configValue,
+                DiscordCredentials.providerRelayBaseUrl(), CREDENTIAL_POLICY);
     }
 
     /** Whether a relay base URL is configured (route via the relay; send no bot token). */
@@ -432,12 +480,9 @@ public final class DiscordPresenceConfig {
     }
 
     public static String getWebhookUrl() {
-        String relay = getRelayBaseUrl();
-        if (!relay.isBlank()) {
-            return relay + "/hook";
-        }
         String configValue = isLoaded() ? WEBHOOK_URL.get() : "";
-        return CredentialResolver.resolve(configValue, DiscordCredentials.providerWebhookUrl(), CREDENTIAL_POLICY);
+        return resolveWebhookUrl(devWebhookOverride(), getRelayBaseUrl(), configValue,
+                DiscordCredentials.providerWebhookUrl(), CREDENTIAL_POLICY);
     }
 
     /** Base URL for bot REST calls: the relay's {@code /bot} in relay-mode, else Discord's API directly. */

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static games.brennan.discordpresence.config.CredentialResolver.Policy.PROVIDER_WINS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -164,5 +165,58 @@ class DiscordPresenceConfigSeamTest {
         });
         assertTrue(DiscordPresenceConfig.getPresenceTrackUserIds().isEmpty());
         assertFalse(DiscordPresenceConfig.isPresenceTrackingEnabled());
+    }
+
+    // --- Dev webhook env-var override (DISCORDPRESENCE_DEV_WEBHOOK_URL) ----------------------------
+    // The env read itself isn't portably settable in a unit test, so the precedence + relay-forcing
+    // logic is extracted into pure helpers and exercised here directly. The blank-relay → Discord-direct
+    // consequence is covered by noRelay_botApiBaseIsDiscordDirect above.
+
+    @Test
+    void devOverride_winsOverConfigProviderAndRelay() {
+        assertEquals("https://dev/hook", DiscordPresenceConfig.resolveWebhookUrl(
+                "https://dev/hook", "https://relay/base", "https://admin/hook", "https://provider/hook", PROVIDER_WINS));
+    }
+
+    @Test
+    void devOverride_isTrimmed() {
+        assertEquals("https://dev/hook", DiscordPresenceConfig.resolveWebhookUrl(
+                "  https://dev/hook  ", "", "", "", PROVIDER_WINS));
+    }
+
+    @Test
+    void devOverride_whitespaceIgnored_fallsThroughToRelay() {
+        assertEquals("https://relay/base/hook", DiscordPresenceConfig.resolveWebhookUrl(
+                "   ", "https://relay/base", "https://admin/hook", "https://provider/hook", PROVIDER_WINS));
+    }
+
+    @Test
+    void devOverride_nullIsSafe_resolvesConfigProvider() {
+        assertEquals("https://provider/hook", DiscordPresenceConfig.resolveWebhookUrl(
+                null, "", "https://admin/hook", "https://provider/hook", PROVIDER_WINS));
+    }
+
+    @Test
+    void noDevOverride_relayMode_derivesHook() {
+        assertEquals("https://relay/base/hook", DiscordPresenceConfig.resolveWebhookUrl(
+                "", "https://relay/base", "https://admin/hook", "https://provider/hook", PROVIDER_WINS));
+    }
+
+    @Test
+    void devOverride_forcesRelayOff() {
+        assertEquals("", DiscordPresenceConfig.resolveRelayBaseUrl(
+                "https://dev/hook", "https://relay/base", "https://provider/relay", PROVIDER_WINS));
+    }
+
+    @Test
+    void noDevOverride_relayResolvesAndStripsTrailingSlash() {
+        assertEquals("https://relay/base", DiscordPresenceConfig.resolveRelayBaseUrl(
+                "", "https://relay/base/", "", PROVIDER_WINS));
+    }
+
+    @Test
+    void devOverride_whitespaceDoesNotForceRelayOff() {
+        assertEquals("https://relay/base", DiscordPresenceConfig.resolveRelayBaseUrl(
+                "   ", "https://relay/base", "", PROVIDER_WINS));
     }
 }
