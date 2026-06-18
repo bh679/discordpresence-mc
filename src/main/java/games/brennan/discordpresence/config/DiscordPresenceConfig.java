@@ -2,6 +2,7 @@ package games.brennan.discordpresence.config;
 
 import net.neoforged.neoforge.common.ModConfigSpec;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -479,10 +480,59 @@ public final class DiscordPresenceConfig {
         return !getRelayBaseUrl().isBlank();
     }
 
+    /**
+     * Whether the {@link #DEV_WEBHOOK_ENV} override is set (non-blank) — DP is running in
+     * dev-override mode (forced direct-to-Discord, posting to the dev webhook). The key signal for
+     * telling a local dev run from a live one.
+     */
+    public static boolean isDevWebhookOverrideActive() {
+        return !devWebhookOverride().isBlank();
+    }
+
     public static String getWebhookUrl() {
         String configValue = isLoaded() ? WEBHOOK_URL.get() : "";
         return resolveWebhookUrl(devWebhookOverride(), getRelayBaseUrl(), configValue,
                 DiscordCredentials.providerWebhookUrl(), CREDENTIAL_POLICY);
+    }
+
+    /**
+     * Secret-safe one-line summary of where Discord posts are routed, for startup logging — e.g.
+     * {@code "devOverride=false, mode=relay, target=brennan.games"} (live, via relay) vs
+     * {@code "devOverride=true, mode=direct, target=discord.com"} (dev override active). Reads the
+     * live env/config; delegates to the pure overload.
+     */
+    public static String describeRouting() {
+        return describeRouting(isDevWebhookOverrideActive(), isRelayMode(),
+                getRelayBaseUrl(), getWebhookUrl());
+    }
+
+    /**
+     * Pure routing summary (no env / no NeoForge — unit-testable). {@code target} is a host only
+     * (see {@link #safeHost}): the relay base host in relay-mode, else the webhook host. The
+     * dev-override flag and relay/direct mode are the signals that distinguish a dev run from a live one.
+     */
+    static String describeRouting(boolean devOverrideActive, boolean relayMode, String relayBaseUrl,
+                                  String webhookUrl) {
+        String mode = relayMode ? "relay" : "direct";
+        String target = safeHost(relayMode ? relayBaseUrl : webhookUrl);
+        return "devOverride=" + devOverrideActive + ", mode=" + mode + ", target=" + target;
+    }
+
+    /**
+     * Host of {@code url} for safe logging — NEVER the path/query. The webhook URL embeds a secret
+     * token in its path and the relay base a capability token, so logging the host alone keeps secrets
+     * out of the log. Returns {@code "none"} for blank/null and {@code "unparseable"} on malformed input.
+     */
+    static String safeHost(String url) {
+        if (url == null || url.isBlank()) {
+            return "none";
+        }
+        try {
+            String host = URI.create(url.trim()).getHost();
+            return (host == null || host.isBlank()) ? "unparseable" : host;
+        } catch (RuntimeException e) {
+            return "unparseable";
+        }
     }
 
     /** Base URL for bot REST calls: the relay's {@code /bot} in relay-mode, else Discord's API directly. */
