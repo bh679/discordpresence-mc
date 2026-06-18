@@ -65,7 +65,31 @@ class SurveyTest {
     void questionValidationRejectsBadInput() {
         assertThrows(IllegalArgumentException.class, () -> new SurveyQuestion("", "p", 0, 10, true));
         assertThrows(IllegalArgumentException.class, () -> new SurveyQuestion("id", " ", 0, 10, true));
-        assertThrows(IllegalArgumentException.class, () -> new SurveyQuestion("id", "p", 10, 0, true));
+        // An inverted scale with no comment leaves no way to answer — rejected. (With a comment
+        // it is the valid "text question" form, covered by noScaleQuestionRequiresComment.)
+        assertThrows(IllegalArgumentException.class, () -> new SurveyQuestion("id", "p", 10, 0, false));
+    }
+
+    @Test
+    void textQuestionHasNoScaleButAllowsComment() {
+        SurveyQuestion q = SurveyQuestion.text("test:txt", "If you could change one thing?");
+        assertFalse(q.hasScale(), "a text question has no rating scale");
+        assertTrue(q.allowComment(), "a text question's comment is its answer");
+    }
+
+    @Test
+    void scaleQuestionHasScale() {
+        assertTrue(new SurveyQuestion("test:s", "Rate", 0, 10, true).hasScale());
+        assertTrue(SurveyQuestion.nps("test:n", "NPS").hasScale());
+    }
+
+    @Test
+    void noScaleQuestionRequiresComment() {
+        // Allowed: no scale + comment (the text-question form).
+        SurveyQuestion ok = new SurveyQuestion("test:ok", "Q", 0, -1, true);
+        assertFalse(ok.hasScale());
+        // Rejected: no scale + no comment leaves nothing to answer with.
+        assertThrows(IllegalArgumentException.class, () -> new SurveyQuestion("test:bad", "Q", 0, -1, false));
     }
 
     @Test
@@ -91,6 +115,16 @@ class SurveyTest {
         assertEquals(1, q.scaleMin());
         assertEquals(5, q.scaleMax());
         assertFalse(q.allowComment());
+    }
+
+    @Test
+    void loaderParsesTextQuestion() {
+        JsonObject o = new JsonObject();
+        o.addProperty("prompt", "If you could change one thing about the mod, what would it be?");
+        o.addProperty("scale", false);
+        SurveyQuestion q = SurveyQuestionLoader.parse("test:change", o);
+        assertFalse(q.hasScale(), "scale:false → no rating scale");
+        assertTrue(q.allowComment(), "a text question always allows the (answer) comment");
     }
 
     @Test

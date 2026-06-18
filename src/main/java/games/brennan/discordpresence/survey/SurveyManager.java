@@ -84,15 +84,18 @@ public final class SurveyManager {
         }
         // No "already answered" guard: the survey re-opens on every death and via /feedback, and
         // every submit posts.
-        int clamped = question.clampScore(score);
         String cleaned = sanitizeComment(comment);
         store.markAnswered(uuid, questionId);
 
         String name = player.getGameProfile().getName();
         List<DeathField> fields = new ArrayList<>();
-        fields.add(new DeathField("Rating", clamped + " / " + question.scaleMax()));
+        if (question.hasScale()) {
+            fields.add(new DeathField("Rating", question.clampScore(score) + " / " + question.scaleMax()));
+        }
         if (!cleaned.isBlank()) {
-            fields.add(new DeathField("Comment", cleaned));
+            // For a text (no-scale) question the comment IS the answer; for a scale question it
+            // is the optional reason for the score. Label the Discord field accordingly.
+            fields.add(new DeathField(question.hasScale() ? "Comment" : "Answer", cleaned));
         }
         DiscordService.get().postSurveyResponse(player, "📋 Feedback — " + name, question.prompt(), fields);
 

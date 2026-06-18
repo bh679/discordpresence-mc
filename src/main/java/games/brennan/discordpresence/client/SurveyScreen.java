@@ -14,7 +14,8 @@ import java.util.List;
 
 /**
  * The feedback survey window: walks the survey questions one screen at a
- * time. Each question is a 0–N rating + an optional comment; Submit sends the answer to
+ * time. A question is either a 0–N rating + an optional comment, or a comment-only text
+ * question (no rating row — the text box is the sole answer). Submit sends the answer to
  * the server (which posts it to Discord) and advances to the next question. After the last
  * question the screen closes back to the death screen. Closing early (Esc) just returns to
  * the death screen; the survey is offered again on the next death.
@@ -32,6 +33,7 @@ public final class SurveyScreen extends Screen {
     private final List<SurveyQuestionPayload.Entry> questions;
 
     private int index = 0;
+    private boolean hasScale = true;
     private int selectedScore = NO_SCORE;
     private Button[] scoreButtons = new Button[0];
     private EditBox commentBox;
@@ -56,37 +58,51 @@ public final class SurveyScreen extends Screen {
         int promptLines = this.font.split(Component.literal(q.prompt()), CONTENT_WIDTH).size();
         int promptBottom = promptTop() + promptLines * (this.font.lineHeight + 2);
 
-        // 0–N score buttons in a single centered row.
-        int count = Math.max(1, q.scaleMax() - q.scaleMin() + 1);
-        scoreButtons = new Button[count];
-        int cellW = (CONTENT_WIDTH - (count - 1) * SCORE_GAP) / count;
-        int rowW = count * cellW + (count - 1) * SCORE_GAP;
-        int rowX = centerX - rowW / 2;
-        int scoreY = promptBottom + 12;
-        for (int i = 0; i < count; i++) {
-            int value = q.scaleMin() + i;
-            int x = rowX + i * (cellW + SCORE_GAP);
-            Button b = Button.builder(Component.literal(Integer.toString(value)), btn -> selectScore(value))
-                    .bounds(x, scoreY, cellW, SCORE_H)
-                    .build();
-            scoreButtons[i] = b;
-            addRenderableWidget(b);
+        this.hasScale = q.scaleMax() >= q.scaleMin();
+        int y;
+        if (hasScale) {
+            // 0–N score buttons in a single centered row.
+            int count = q.scaleMax() - q.scaleMin() + 1;
+            scoreButtons = new Button[count];
+            int cellW = (CONTENT_WIDTH - (count - 1) * SCORE_GAP) / count;
+            int rowW = count * cellW + (count - 1) * SCORE_GAP;
+            int rowX = centerX - rowW / 2;
+            int scoreY = promptBottom + 12;
+            for (int i = 0; i < count; i++) {
+                int value = q.scaleMin() + i;
+                int x = rowX + i * (cellW + SCORE_GAP);
+                Button b = Button.builder(Component.literal(Integer.toString(value)), btn -> selectScore(value))
+                        .bounds(x, scoreY, cellW, SCORE_H)
+                        .build();
+                scoreButtons[i] = b;
+                addRenderableWidget(b);
+            }
+            y = scoreY + SCORE_H + 10;
+        } else {
+            // Text question: no rating row — the comment box below is the sole answer.
+            scoreButtons = new Button[0];
+            y = promptBottom + 12;
         }
 
-        int y = scoreY + SCORE_H + 10;
-
-        // Optional comment box (fresh per question).
+        // Comment box (fresh per question): an optional reason for a scale question, or the
+        // required sole answer for a text question.
         if (q.allowComment()) {
             commentBox = new EditBox(this.font, left, y, CONTENT_WIDTH, 20, Component.literal("Comment"));
             commentBox.setMaxLength(256);
-            commentBox.setHint(Component.literal("What's the main reason for your score? (optional)"));
+            commentBox.setHint(Component.literal(
+                    hasScale ? "What's the main reason for your score? (optional)" : "Type your answer here…"));
+            if (!hasScale) {
+                // No score to gate on — enable Submit only once the player has typed an answer.
+                commentBox.setResponder(text -> submitButton.active = !text.trim().isEmpty());
+            }
             addRenderableWidget(commentBox);
             y += 28;
         } else {
             commentBox = null;
         }
 
-        // Submit (+ advance) — centered, fixed width; selecting a score enables it.
+        // Submit (+ advance) — centered, fixed width. Enabled by a score pick (scale question)
+        // or once the answer box is non-empty (text question); see the responder above.
         boolean last = index == questions.size() - 1;
         submitButton = Button.builder(Component.literal(last ? "Submit" : "Submit & next"), b -> submit())
                 .bounds(centerX - SUBMIT_W / 2, y, SUBMIT_W, 20)
@@ -105,12 +121,17 @@ public final class SurveyScreen extends Screen {
     }
 
     private void submit() {
-        if (selectedScore == NO_SCORE) {
-            return;
-        }
         SurveyQuestionPayload.Entry q = current();
         String comment = commentBox == null ? "" : commentBox.getValue().trim();
-        DPNetwork.sendToServer(new SurveySubmitPayload(q.id(), selectedScore, comment));
+        if (hasScale) {
+            if (selectedScore == NO_SCORE) {
+                return; // a rating must be picked first
+            }
+        } else if (comment.isEmpty()) {
+            return; // text question — an answer must be typed
+        }
+        int score = hasScale ? selectedScore : 0; // text questions carry no rating
+        DPNetwork.sendToServer(new SurveySubmitPayload(q.id(), score, comment));
         advance();
     }
 
