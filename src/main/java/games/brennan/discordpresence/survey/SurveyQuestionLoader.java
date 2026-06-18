@@ -26,8 +26,9 @@ import java.util.Map;
  *
  * <p>JSON shape (only {@code prompt} is required):
  * {@code {"prompt": "...", "scale_min": 0, "scale_max": 10, "allow_comment": true, "order": 100}}.
- * Loaded questions are sorted by {@code (order, id)} and handed to
- * {@link SurveyRegistry#setDataDriven}; they appear after the built-in NPS question.</p>
+ * Set {@code "scale": false} instead for a comment-only text question (no rating row — the
+ * free-text box is the sole answer). Loaded questions are sorted by {@code (order, id)} and
+ * handed to {@link SurveyRegistry#setDataDriven}; they appear after the built-in NPS question.</p>
  */
 public final class SurveyQuestionLoader extends SimpleJsonResourceReloadListener {
 
@@ -66,11 +67,16 @@ public final class SurveyQuestionLoader extends SimpleJsonResourceReloadListener
 
     /**
      * Parse one question JSON ({@code id} = its resource location, e.g.
-     * {@code "dungeontrain:difficulty_progression"}). Defaults: scale 0–10, comment
-     * allowed. Throws when {@code prompt} is missing or blank. Package-visible for tests.
+     * {@code "dungeontrain:difficulty_progression"}). Defaults: scale 0–10, comment allowed;
+     * {@code "scale": false} yields a comment-only text question. Throws when {@code prompt} is
+     * missing or blank. Package-visible for tests.
      */
     static SurveyQuestion parse(String id, JsonObject obj) {
         String prompt = GsonHelper.getAsString(obj, "prompt");
+        // "scale": false → a comment-only text question (the comment box is the sole answer).
+        if (!GsonHelper.getAsBoolean(obj, "scale", true)) {
+            return SurveyQuestion.text(id, prompt);
+        }
         int scaleMin = GsonHelper.getAsInt(obj, "scale_min", 0);
         int scaleMax = GsonHelper.getAsInt(obj, "scale_max", 10);
         boolean allowComment = GsonHelper.getAsBoolean(obj, "allow_comment", true);
