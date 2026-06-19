@@ -29,7 +29,7 @@ public final class NetworkConsentScreen extends Screen {
     private static final String TITLE = "Connect to the internet?";
     private static final String BODY = "This mod can use an online connection for:";
     private static final String FALLBACK_FEATURE = "Reactions, chat relay, and join/death reports.";
-    private static final String FOOTNOTE = "Off by default. Change anytime in config or with /chatconnect on.";
+    private static final String FOOTNOTE = "Change anytime in config or with /chatconnect on.";
 
     // Flat card geometry.
     private static final int CARD_W = 300;
