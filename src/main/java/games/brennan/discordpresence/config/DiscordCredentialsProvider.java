@@ -100,6 +100,16 @@ public interface DiscordCredentialsProvider {
     }
 
     /**
+     * Short bullet lines for the title-screen consent popup ("what the internet is for"), supplied
+     * by the bundling mod. Rendered verbatim as a small bulleted list on
+     * {@code NetworkConsentScreen}. Empty = DP's generic fallback wording (standalone DP). Read on
+     * the physical client at title-screen time. Default empty.
+     */
+    default List<String> networkConsentFeatures() {
+        return List.of();
+    }
+
+    /**
      * Discord user ids whose online presence DP should track for the "last seen online" query seam
      * ({@code DiscordService.lastSeenOnline} / {@code isDiscordUserOnline}). Unioned with the admin's
      * {@code presenceTrackUserIds} config. A non-empty result makes DP request the privileged
