@@ -34,7 +34,8 @@ public final class DiscordPresenceClientConfig {
         NETWORK_CONSENT = b
                 .comment("Whether this client has allowed the mod to use the network for its features.",
                          "UNSET shows a one-time confirmation on the title screen; GRANTED enables the",
-                         "network features in singleplayer/LAN; DENIED keeps them off. Change it anytime.")
+                         "network features in singleplayer/LAN; DENIED keeps them off. Change it anytime",
+                         "here, or in-game with /chatconnect on|off (works even when cheats are off).")
                 .defineEnum("networkConsent", Consent.UNSET);
         b.pop();
         b.push("chat");
