@@ -164,6 +164,7 @@ public final class DiscordService {
                 startedServer.isDedicatedServer(), enabled(),
                 DiscordPresenceClientConfig.getConsent(), wantInbound, wantPresence,
                 !DiscordPresenceConfig.getBotToken().isBlank());
+        LOGGER.info("Discord Presence routing: {}", DiscordPresenceConfig.describeRouting());
         startPresenceTracking(startedServer);
         if (!enabled() || !networkAllowed(startedServer) || !(wantInbound || wantPresence)) {
             return;

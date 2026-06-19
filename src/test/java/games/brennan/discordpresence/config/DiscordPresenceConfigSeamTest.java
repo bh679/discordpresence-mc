@@ -219,4 +219,52 @@ class DiscordPresenceConfigSeamTest {
         assertEquals("https://relay/base", DiscordPresenceConfig.resolveRelayBaseUrl(
                 "   ", "https://relay/base", "", PROVIDER_WINS));
     }
+
+    // --- Routing description for startup logging (secret-safe) ------------------------------------
+
+    @Test
+    void describeRouting_devOverride_directAndFlagTrue() {
+        assertEquals("devOverride=true, mode=direct, target=discord.com",
+                DiscordPresenceConfig.describeRouting(true, false, "",
+                        "https://discord.com/api/webhooks/123/SECRET"));
+    }
+
+    @Test
+    void describeRouting_relayMode_targetIsRelayHost_flagFalse() {
+        assertEquals("devOverride=false, mode=relay, target=brennan.games",
+                DiscordPresenceConfig.describeRouting(false, true,
+                        "https://brennan.games/api/dp-relay/CAP",
+                        "https://brennan.games/api/dp-relay/CAP/hook"));
+    }
+
+    @Test
+    void describeRouting_directNoOverride_targetIsWebhookHost() {
+        assertEquals("devOverride=false, mode=direct, target=discord.com",
+                DiscordPresenceConfig.describeRouting(false, false, "",
+                        "https://discord.com/api/webhooks/123/SECRET"));
+    }
+
+    @Test
+    void describeRouting_neverLeaksWebhookTokenOrId() {
+        String s = DiscordPresenceConfig.describeRouting(true, false, "",
+                "https://discord.com/api/webhooks/123456/SUPERSECRETTOKEN");
+        assertFalse(s.contains("SUPERSECRETTOKEN"));
+        assertFalse(s.contains("123456"));
+    }
+
+    @Test
+    void describeRouting_neverLeaksRelayCapabilityToken() {
+        String s = DiscordPresenceConfig.describeRouting(false, true,
+                "https://brennan.games/api/dp-relay/CAPTOKEN",
+                "https://brennan.games/api/dp-relay/CAPTOKEN/hook");
+        assertFalse(s.contains("CAPTOKEN"));
+    }
+
+    @Test
+    void safeHost_blankAndMalformedAreSafe() {
+        assertEquals("none", DiscordPresenceConfig.safeHost(""));
+        assertEquals("none", DiscordPresenceConfig.safeHost(null));
+        assertEquals("none", DiscordPresenceConfig.safeHost("   "));
+        assertEquals("unparseable", DiscordPresenceConfig.safeHost("not a url"));
+    }
 }
