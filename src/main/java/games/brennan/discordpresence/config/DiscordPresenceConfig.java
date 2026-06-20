@@ -8,17 +8,23 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Server-scoped config for Discord Presence, stored at
+ * Config for Discord Presence, stored at
  * {@code <config>/discordpresence-server.toml}.
  *
  * <p>Holds SECRETS (the webhook URL and bot token), so it is registered as
- * {@code ModConfig.Type.SERVER} — server-side only, never transmitted to
- * clients. A blank webhook URL disables the mod entirely; a blank bot token
- * disables only the reactions/threads (messages still post).</p>
+ * {@code ModConfig.Type.COMMON} — loaded on both dists but <b>never synced across
+ * the network</b>. A {@code SERVER} config would be synced to every connecting
+ * client and would leak these secrets; {@code COMMON} keeps them on the server.
+ * A blank webhook URL disables the mod entirely; a blank bot token disables only
+ * the reactions/threads (messages still post).</p>
  *
- * <p>SERVER config is loaded only inside an active world/server, so the static
- * getters guard on {@link #isLoaded()} and fall back to defaults otherwise
- * (mirrors Dungeon Train's {@code DungeonTrainConfig}).</p>
+ * <p>The file keeps its historical {@code -server.toml} name (the file a server
+ * operator edits; gitignored via {@code *-server.toml}). All Discord I/O runs
+ * server-side, so a physical client's own copy stays blank and unused.</p>
+ *
+ * <p>A {@code COMMON} config loads early (before {@code FMLCommonSetupEvent}) and
+ * stays loaded, but the static getters still guard on {@link #isLoaded()} and fall
+ * back to defaults otherwise (mirrors Dungeon Train's {@code DungeonTrainConfig}).</p>
  */
 public final class DiscordPresenceConfig {
 
@@ -412,7 +418,7 @@ public final class DiscordPresenceConfig {
 
     private DiscordPresenceConfig() {}
 
-    /** SERVER config is only loaded inside an active world/server. */
+    /** True once the COMMON config has been read (before FMLCommonSetupEvent, on either dist). */
     public static boolean isLoaded() {
         return SPEC.isLoaded();
     }
