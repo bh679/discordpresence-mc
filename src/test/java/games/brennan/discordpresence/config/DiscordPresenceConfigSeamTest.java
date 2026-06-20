@@ -12,9 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Verifies the public {@link DiscordPresenceConfig} getters honour a registered
- * provider. Outside a running server the SERVER config is not loaded, so the
- * config side resolves to {@code ""} and the provider drives the result — exactly
- * the bundled-mod path, and proof the getter wiring (not just the helpers) works.
+ * provider. In a unit test the COMMON config is not loaded ({@code isLoaded()} is
+ * false), so the config side resolves to {@code ""} and the provider drives the
+ * result — exactly the bundled-mod path, and proof the getter wiring (not just the
+ * helpers) works.
  */
 class DiscordPresenceConfigSeamTest {
 

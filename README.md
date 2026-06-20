@@ -88,9 +88,10 @@ chatter is ignored, and the bot's/webhook's own messages are never echoed back.
 | `discordToGameFormat` | `<{user}> {msg}` | How a relayed Discord message reads in-game. `{user}` = author, `{msg}` = text. |
 | `presenceTrackUserIds` | `[]` | Discord user ids to track for the "last seen online" query API (`DiscordService.lastSeenOnline`). Non-empty needs the bot token + the **Presence** privileged intent; empty (default) requests no presence intent, so existing chat is unaffected. |
 
-> `discordpresence-server.toml` holds secrets and is **server-side only** (never sent to
-> clients). Don't commit it. A separate `discordpresence-client.toml` stores only your one-time
-> network-access choice (`networkConsent`) — no secrets.
+> `discordpresence-server.toml` holds secrets, so it is a **`COMMON` config — never synced to
+> clients** (the bot token stays on the server). Only edit it on the server; don't commit it. A
+> separate `discordpresence-client.toml` stores only your one-time network-access choice
+> (`networkConsent`) — no secrets.
 
 ### Auto-responses ("whispers into the darkness")
 
