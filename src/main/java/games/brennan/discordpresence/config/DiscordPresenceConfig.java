@@ -67,6 +67,8 @@ public final class DiscordPresenceConfig {
     public static final boolean DEFAULT_SURVEY_ENABLED = true;
     public static final int DEFAULT_SURVEY_EMBED_COLOR = 0x5865F2; // blue — distinct from death/disconnect
 
+    public static final boolean DEFAULT_REINCARNATION_BRIDGE = true;
+
     public static final boolean DEFAULT_RELAY_DISCORD_TO_GAME = true;
     public static final boolean DEFAULT_RELAY_GAME_TO_DISCORD = true;
     public static final boolean DEFAULT_RELAY_GAME_TO_DISCORD_ENGAGED_ONLY = false;
@@ -160,6 +162,7 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.IntValue DISCONNECT_REPORT_EMBED_COLOR;
     public static final ModConfigSpec.BooleanValue SURVEY_ENABLED;
     public static final ModConfigSpec.IntValue SURVEY_EMBED_COLOR;
+    public static final ModConfigSpec.BooleanValue REINCARNATION_BRIDGE;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -358,6 +361,14 @@ public final class DiscordPresenceConfig {
                 .comment("Embed colour for a posted survey response, as a decimal 0xRRGGBB value (default 0x5865F2,",
                          "a blue — visually distinct from the death and disconnect reports).")
                 .defineInRange("surveyEmbedColor", DEFAULT_SURVEY_EMBED_COLOR, 0x000000, 0xFFFFFF);
+        REINCARNATION_BRIDGE = b
+                .comment("Bridge PlayerMob's cross-world reincarnation pool to the relay (requires the PlayerMob mod",
+                         "AND relayBaseUrl set — there is no cross-world pool in direct-to-Discord mode). When on, a",
+                         "PlayerMob death is forwarded to the relay's shared pool, and remote past lives are pre-fetched",
+                         "so a PlayerMob may spawn as a 'remote echo' of a player who died in another world. No effect",
+                         "without PlayerMob or without a relay. On a dedicated server this is on by default; in",
+                         "singleplayer it also needs the one-time in-game network confirmation. Set false to disable.")
+                .define("reincarnationBridge", DEFAULT_REINCARNATION_BRIDGE);
         b.pop();
 
         b.push("autoResponse");
@@ -770,5 +781,14 @@ public final class DiscordPresenceConfig {
 
     public static int getSurveyEmbedColor() {
         return isLoaded() ? SURVEY_EMBED_COLOR.get() : DEFAULT_SURVEY_EMBED_COLOR;
+    }
+
+    /**
+     * Whether the PlayerMob ↔ relay cross-world reincarnation bridge is enabled. Only takes effect when
+     * the PlayerMob mod is installed and DP is in relay-mode (the relay holds the cross-world pool);
+     * otherwise inert regardless. See {@code reincarnation.ReincarnationManager}.
+     */
+    public static boolean isReincarnationBridgeEnabled() {
+        return isLoaded() ? REINCARNATION_BRIDGE.get() : DEFAULT_REINCARNATION_BRIDGE;
     }
 }

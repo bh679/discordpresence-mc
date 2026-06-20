@@ -6,6 +6,7 @@ import com.mojang.logging.LogUtils;
 import games.brennan.discordpresence.config.DiscordCredentials;
 import games.brennan.discordpresence.config.DiscordPresenceClientConfig;
 import games.brennan.discordpresence.config.DiscordPresenceConfig;
+import games.brennan.discordpresence.reincarnation.ReincarnationManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.advancements.AdvancementHolder;
 import net.minecraft.advancements.DisplayInfo;
@@ -36,6 +37,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
  * Orchestrates Discord Presence end-to-end: posts the join message, maintains one
@@ -102,6 +104,9 @@ public final class DiscordService {
     /** In-game "whispers into the darkness" auto-responses — game-side only, no Discord I/O. */
     private final AutoResponder autoResponder = new AutoResponder();
 
+    /** Cross-world reincarnation bridge (PlayerMob ↔ relay pool); inert unless relay-mode + PlayerMob present. */
+    private final ReincarnationManager reincarnation = new ReincarnationManager();
+
     /** One-shot WARN so a missing privileged intent doesn't spam the log. */
     private final AtomicBoolean warnedBlankContent = new AtomicBoolean(false);
 
@@ -166,6 +171,9 @@ public final class DiscordService {
                 !DiscordPresenceConfig.getBotToken().isBlank());
         LOGGER.info("Discord Presence routing: {}", DiscordPresenceConfig.describeRouting());
         startPresenceTracking(startedServer);
+        // Cross-world reincarnation bridge — independent of the chat/presence gateway gating below; it has
+        // its own gate (relay-mode + PlayerMob present), so start it before the early returns.
+        reincarnation.start(startedServer, networkAllowed(startedServer));
         if (!enabled() || !networkAllowed(startedServer) || !(wantInbound || wantPresence)) {
             return;
         }
@@ -546,6 +554,23 @@ public final class DiscordService {
         return discordPresenceStore.status(discordUserId).map(s -> !PresenceUpdate.OFFLINE.equals(s));
     }
 
+    // --- cross-world reincarnation debug seam (the /dpreincarnation command) ---
+
+    /** One-line diagnostic of the reincarnation bridge + cache/outbox state. */
+    public String reincarnationDebugStatus() {
+        return reincarnation.debugStatus();
+    }
+
+    /** Force an immediate outbound scrape+POST of PlayerMob deaths; false when the bridge is inactive. */
+    public boolean reincarnationDebugPost() {
+        return reincarnation.debugForcePost();
+    }
+
+    /** Force an immediate inbound fetch for {@code owner} at {@code carriage} (null = any); false when inactive. */
+    public boolean reincarnationDebugFetch(UUID owner, Integer carriage, Consumer<String> reply) {
+        return reincarnation.debugForceFetch(owner, carriage, reply);
+    }
+
     /**
      * Pure relay decision: a non-bot, non-webhook message anchored to a tracked
      * player message — a reply to it, or a message in the thread spun off it
@@ -751,6 +776,7 @@ public final class DiscordService {
         if (rpp != null) {
             rpp.stop();
         }
+        reincarnation.stop(); // cancel the reincarnation tick + drop the inbound cache (outbox stays on disk)
         GatewayConnection gw = gateway;
         gateway = null;
         if (gw != null) {

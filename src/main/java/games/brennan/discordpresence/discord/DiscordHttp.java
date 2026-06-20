@@ -17,10 +17,14 @@ import java.util.concurrent.ScheduledExecutorService;
  * small cached pool — NOT a single thread — because the JDK {@link java.net.http.WebSocket}
  * dispatches its onOpen/onText listener callbacks on this executor; one thread starves
  * them and the gateway hangs forever "awaiting HELLO".
+ *
+ * <p>The shared client/executors/timeout are {@code public} so sibling features outside this
+ * package (e.g. the {@code reincarnation} relay client) reuse the same daemon HTTP infrastructure
+ * rather than spinning up their own. The bot-request helpers stay package-private (Discord-only).</p>
  */
-final class DiscordHttp {
+public final class DiscordHttp {
 
-    static final Duration TIMEOUT = Duration.ofSeconds(10);
+    public static final Duration TIMEOUT = Duration.ofSeconds(10);
 
     /**
      * Longer per-request timeout for report posts that carry a composed/uploaded image (death &
@@ -29,7 +33,7 @@ final class DiscordHttp {
      */
     static final Duration REPORT_TIMEOUT = Duration.ofSeconds(30);
 
-    static final ExecutorService EXECUTOR = Executors.newCachedThreadPool(r -> {
+    public static final ExecutorService EXECUTOR = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "DiscordPresence-HTTP");
         t.setDaemon(true);
         return t;
@@ -41,13 +45,13 @@ final class DiscordHttp {
      * heartbeat timing can never be starved behind in-flight HTTP/WebSocket
      * callbacks (which would trip false zombie-connection detection).
      */
-    static final ScheduledExecutorService SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
+    public static final ScheduledExecutorService SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "DiscordPresence-Gateway");
         t.setDaemon(true);
         return t;
     });
 
-    static final HttpClient CLIENT = HttpClient.newBuilder()
+    public static final HttpClient CLIENT = HttpClient.newBuilder()
             .connectTimeout(TIMEOUT)
             .executor(EXECUTOR)
             .build();
