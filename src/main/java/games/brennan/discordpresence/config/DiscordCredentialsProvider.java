@@ -110,6 +110,17 @@ public interface DiscordCredentialsProvider {
     }
 
     /**
+     * Short bullet lines for things the connection will <i>not</i> do, supplied by the bundling mod.
+     * Rendered below {@link #networkConsentFeatures()} on {@code NetworkConsentScreen} with a red ✗
+     * marker (instead of the blue dot; the text itself stays the normal bullet grey) so the "won't
+     * do" reassurances read as the opposite of the positive bullets. Empty = no negative section
+     * shown. Read on the physical client at title-screen time. Default empty.
+     */
+    default List<String> networkConsentNonFeatures() {
+        return List.of();
+    }
+
+    /**
      * Discord user ids whose online presence DP should track for the "last seen online" query seam
      * ({@code DiscordService.lastSeenOnline} / {@code isDiscordUserOnline}). Unioned with the admin's
      * {@code presenceTrackUserIds} config. A non-empty result makes DP request the privileged
