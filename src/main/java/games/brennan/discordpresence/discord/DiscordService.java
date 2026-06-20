@@ -6,6 +6,7 @@ import com.mojang.logging.LogUtils;
 import games.brennan.discordpresence.config.DiscordCredentials;
 import games.brennan.discordpresence.config.DiscordPresenceClientConfig;
 import games.brennan.discordpresence.config.DiscordPresenceConfig;
+import games.brennan.discordpresence.reincarnation.ReincarnationManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.advancements.AdvancementHolder;
 import net.minecraft.advancements.DisplayInfo;
@@ -102,6 +103,9 @@ public final class DiscordService {
     /** In-game "whispers into the darkness" auto-responses — game-side only, no Discord I/O. */
     private final AutoResponder autoResponder = new AutoResponder();
 
+    /** Cross-world reincarnation bridge (PlayerMob ↔ relay pool); inert unless relay-mode + PlayerMob present. */
+    private final ReincarnationManager reincarnation = new ReincarnationManager();
+
     /** One-shot WARN so a missing privileged intent doesn't spam the log. */
     private final AtomicBoolean warnedBlankContent = new AtomicBoolean(false);
 
@@ -166,6 +170,9 @@ public final class DiscordService {
                 !DiscordPresenceConfig.getBotToken().isBlank());
         LOGGER.info("Discord Presence routing: {}", DiscordPresenceConfig.describeRouting());
         startPresenceTracking(startedServer);
+        // Cross-world reincarnation bridge — independent of the chat/presence gateway gating below; it has
+        // its own gate (relay-mode + PlayerMob present), so start it before the early returns.
+        reincarnation.start(startedServer, networkAllowed(startedServer));
         if (!enabled() || !networkAllowed(startedServer) || !(wantInbound || wantPresence)) {
             return;
         }
@@ -751,6 +758,7 @@ public final class DiscordService {
         if (rpp != null) {
             rpp.stop();
         }
+        reincarnation.stop(); // cancel the reincarnation tick + drop the inbound cache (outbox stays on disk)
         GatewayConnection gw = gateway;
         gateway = null;
         if (gw != null) {
