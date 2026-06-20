@@ -19,5 +19,6 @@ public final class DPCommands {
     @SubscribeEvent
     public static void onRegisterCommands(RegisterCommandsEvent event) {
         FeedbackCommand.register(event.getDispatcher());
+        ReincarnationCommand.register(event.getDispatcher()); // /dpreincarnation — cross-world reincarnation diagnostics
     }
 }

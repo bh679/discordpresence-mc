@@ -109,6 +109,20 @@ final class ReincarnationCache {
         bands.put(owner, new CachedBand(carriage, List.copyOf(records), now));
     }
 
+    /** Number of owners with a cached band (diagnostic). */
+    int cachedOwnerCount() {
+        return bands.size();
+    }
+
+    /** Number of cached records for {@code owner} (diagnostic). */
+    int cachedCountFor(UUID owner) {
+        if (owner == null) {
+            return 0;
+        }
+        CachedBand band = bands.get(owner);
+        return band == null ? 0 : band.records().size();
+    }
+
     /** Drop all observations + cached bands + in-flight markers (server stop). */
     void clear() {
         observed.clear();

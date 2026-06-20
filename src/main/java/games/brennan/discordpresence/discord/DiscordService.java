@@ -37,6 +37,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
  * Orchestrates Discord Presence end-to-end: posts the join message, maintains one
@@ -551,6 +552,23 @@ public final class DiscordService {
      */
     public Optional<Boolean> isDiscordUserOnline(String discordUserId) {
         return discordPresenceStore.status(discordUserId).map(s -> !PresenceUpdate.OFFLINE.equals(s));
+    }
+
+    // --- cross-world reincarnation debug seam (the /dpreincarnation command) ---
+
+    /** One-line diagnostic of the reincarnation bridge + cache/outbox state. */
+    public String reincarnationDebugStatus() {
+        return reincarnation.debugStatus();
+    }
+
+    /** Force an immediate outbound scrape+POST of PlayerMob deaths; false when the bridge is inactive. */
+    public boolean reincarnationDebugPost() {
+        return reincarnation.debugForcePost();
+    }
+
+    /** Force an immediate inbound fetch for {@code owner} at {@code carriage} (null = any); false when inactive. */
+    public boolean reincarnationDebugFetch(UUID owner, Integer carriage, Consumer<String> reply) {
+        return reincarnation.debugForceFetch(owner, carriage, reply);
     }
 
     /**

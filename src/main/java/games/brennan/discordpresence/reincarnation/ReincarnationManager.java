@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * Coordinates the cross-world reincarnation bridge between PlayerMob's {@code ReincarnationSource}
@@ -112,6 +113,60 @@ public final class ReincarnationManager {
     static boolean shouldBridge(boolean bridgeEnabled, boolean playerMobLoaded, boolean relayMode,
                                 boolean networkAllowed) {
         return bridgeEnabled && playerMobLoaded && relayMode && networkAllowed;
+    }
+
+    // --- debug / test helpers (the /dpreincarnation command) -----------------
+
+    /** One-line diagnostic of the bridge + cache/outbox state. */
+    public String debugStatus() {
+        PlayerMobSeam s = seam;
+        return "active=" + (task != null)
+                + ", relayMode=" + DiscordPresenceConfig.isRelayMode()
+                + ", playermob=" + ModList.get().isLoaded(PLAYERMOB_MOD_ID)
+                + ", seam=" + (s != null && s.available())
+                + ", cachedBands=" + cache.cachedOwnerCount()
+                + ", outboxKeys=" + outbox.size();
+    }
+
+    /**
+     * Force an immediate outbound scrape+POST of PlayerMob's recent deaths, bypassing the 60s tick.
+     * Returns {@code false} when the bridge can't reach the relay (not active / not relay-mode).
+     */
+    public boolean debugForcePost() {
+        MinecraftServer srv = server;
+        PlayerMobSeam s = seam;
+        String base = DiscordPresenceConfig.getRelayBaseUrl();
+        if (srv == null || s == null || !s.available() || base.isBlank()) {
+            return false;
+        }
+        outboundTick(srv, base);
+        return true;
+    }
+
+    /**
+     * Force an immediate inbound fetch for {@code owner} at {@code carriage} (or "any" when null),
+     * caching the built lives and reporting the count via {@code reply} on completion. Returns
+     * {@code false} when the bridge can't reach the relay.
+     */
+    public boolean debugForceFetch(UUID owner, Integer carriage, Consumer<String> reply) {
+        PlayerMobSeam s = seam;
+        String base = DiscordPresenceConfig.getRelayBaseUrl();
+        if (owner == null || s == null || !s.available() || base.isBlank()) {
+            return false;
+        }
+        int storeCarriage = carriage != null ? carriage : s.noCarriage();
+        Integer carriageParam = (carriage != null && carriage == s.noCarriage()) ? null : carriage;
+        cache.observe(owner, storeCarriage);
+        RelayReincarnationClient.fetch(base, carriageParam, INBOUND_RADIUS, owner.toString(), INBOUND_LIMIT)
+                .whenComplete((records, err) -> {
+                    List<Object> built = records == null ? List.of() : buildRecords(s, records);
+                    cache.store(owner, storeCarriage, built, System.currentTimeMillis());
+                    if (reply != null) {
+                        reply.accept("fetched " + built.size() + " remote life(ies) for carriage "
+                                + (carriage != null ? carriage : "any"));
+                    }
+                });
+        return true;
     }
 
     /** The first failing gate, for an inert-reason log line. Pure → unit-tested. */
