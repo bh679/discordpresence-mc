@@ -22,6 +22,13 @@ final class DiscordHttp {
 
     static final Duration TIMEOUT = Duration.ofSeconds(10);
 
+    /**
+     * Longer per-request timeout for report posts that carry a composed/uploaded image (death &
+     * disconnect reports). A multipart PNG — especially a full screenshot routed through the relay on a
+     * slow uplink — can take well over the 10s {@link #TIMEOUT} that suffices for tiny JSON calls.
+     */
+    static final Duration REPORT_TIMEOUT = Duration.ofSeconds(30);
+
     static final ExecutorService EXECUTOR = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "DiscordPresence-HTTP");
         t.setDaemon(true);

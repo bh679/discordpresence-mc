@@ -829,6 +829,35 @@ public final class DiscordService {
     }
 
     /**
+     * Like {@link #postDeathReportTopLevel(ServerPlayer, String, String, List, List)} but attaches a
+     * <b>caller-supplied PNG</b> (e.g. an in-game screenshot) as the embed image, rather than composing
+     * one from item icons. {@code pngImage} null → no image. Always top-level (not threaded).
+     * Best-effort; the HTTP runs off-thread.
+     *
+     * <p><b>Public API.</b> A bundling mod passes raw image bytes it captured itself.</p>
+     */
+    public void postDeathReportTopLevel(ServerPlayer player, String title, String description,
+                                        List<DeathField> fields, byte[] pngImage, String filename) {
+        if (!enabled() || !networkAllowed(player.server)) {
+            return;
+        }
+        UUID uuid = player.getUUID();
+        String name = player.getGameProfile().getName();
+        JsonObject embed = buildReportEmbed(title, description, fields,
+                DiscordPresenceConfig.getDeathReportEmbedColor());
+        DiscordWebhookClient.postReport(name, uuid, null, embed, pngImage, filename)
+                .thenAccept(ref -> {
+                    if (ref != null) {
+                        reverse.put(ref.messageId(), uuid);
+                    }
+                })
+                .exceptionally(t -> {
+                    LOGGER.warn("Top-level death report post failed: {}", t.toString());
+                    return null;
+                });
+    }
+
+    /**
      * Post a disconnect / "left the game" report: the same embed + composed item image as
      * {@link #postDeathReport}, but in the disconnect colour ({@code disconnectReportEmbedColor},
      * a muted grey) so it reads as a session summary, not a death.
