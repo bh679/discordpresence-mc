@@ -28,10 +28,14 @@ public class DiscordPresence {
         // works on a dedicated server with no display (must be set before any AWT use).
         System.setProperty("java.awt.headless", "true");
 
-        // SERVER config — server-side only, never sent to clients. Holds the
-        // webhook URL + bot token secrets; a blank webhook URL disables the mod.
+        // COMMON config — loaded on both dists but NEVER synced across the network
+        // (unlike a SERVER config, which NeoForge syncs to every connecting client and
+        // would therefore leak these secrets). Holds the webhook URL + bot token; a
+        // blank webhook URL disables the mod. The Discord I/O is server-side only, so a
+        // client's own copy stays blank/unused. Filename keeps the historical
+        // "-server" name (it's the file a server operator edits; gitignored via *-server.toml).
         modContainer.registerConfig(
-                ModConfig.Type.SERVER,
+                ModConfig.Type.COMMON,
                 DiscordPresenceConfig.SPEC,
                 "discordpresence-server.toml");
 

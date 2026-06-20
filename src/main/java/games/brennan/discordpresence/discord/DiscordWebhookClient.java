@@ -144,7 +144,7 @@ final class DiscordWebhookClient {
             req = HttpRequest.newBuilder(URI.create(url))
                     .header("Content-Type", mb.contentType())
                     .header("User-Agent", "DiscordPresence-Mod")
-                    .timeout(DiscordHttp.TIMEOUT)
+                    .timeout(DiscordHttp.REPORT_TIMEOUT)  // image upload — needs more than the 10s JSON timeout
                     .POST(HttpRequest.BodyPublishers.ofByteArray(mb.body()))
                     .build();
         } else {

@@ -11,7 +11,7 @@ import java.util.List;
  * <p>Holds the one-time network-access consent the mod asks for on the title
  * screen. It is {@code CLIENT} scope (loaded only on the physical client), so on
  * a dedicated server {@link #isLoaded()} is {@code false} and the consent never
- * applies — dedicated servers opt in through the SERVER config instead.</p>
+ * applies — dedicated servers opt in through the COMMON secrets config instead.</p>
  *
  * <p>Deliberately references only {@link ModConfigSpec} (no client-only classes),
  * so the spec is safe to register on both dists; only the title-screen handler

@@ -46,6 +46,7 @@ public final class NetworkConsentScreen extends Screen {
     private static final int GAP_BODY = 7;
     private static final int GAP_BULLETS = 10;
     private static final int GAP_FOOTNOTE = 12;
+    private static final int GAP_NEG = 4;       // gap between positive bullets and the red "won't do" block
 
     // Flat colours (no gradients).
     private static final int BACKDROP_DIM = 0x99000000;
@@ -56,6 +57,7 @@ public final class NetworkConsentScreen extends Screen {
     private static final int COLOR_BULLET = 0xFFC8C8C8;
     private static final int COLOR_DOT = 0xFF6FB1FF;
     private static final int COLOR_FOOTNOTE = 0xFF808080;
+    private static final int COLOR_NEG = 0xFFFF5555;    // red ✗ marker for "won't do" lines (text stays grey)
 
     private final Screen previousScreen;
 
@@ -67,10 +69,12 @@ public final class NetworkConsentScreen extends Screen {
     private int centerX;
     private List<FormattedCharSequence> bodyLines = List.of();
     private List<List<FormattedCharSequence>> bulletBlocks = List.of();
+    private List<List<FormattedCharSequence>> nonBulletBlocks = List.of();
     private List<FormattedCharSequence> footnoteLines = List.of();
     private int titleY;
     private int bodyY;
     private int bulletsY;
+    private int nonBulletsY;
     private int footnoteY;
 
     public NetworkConsentScreen(Screen previousScreen) {
@@ -96,6 +100,17 @@ public final class NetworkConsentScreen extends Screen {
         }
         bulletBlocks = blocks;
 
+        // Optional "won't do" lines, rendered with a red ✗ below the positive bullets. Empty = no
+        // section, so the layout below stays identical to before when the bundler supplies none.
+        List<String> nonFeatures = DiscordCredentials.providerNetworkConsentNonFeatures();
+        List<List<FormattedCharSequence>> negBlocks = new ArrayList<>(nonFeatures == null ? 0 : nonFeatures.size());
+        if (nonFeatures != null) {
+            for (String nonFeature : nonFeatures) {
+                negBlocks.add(font.split(Component.literal(nonFeature), bulletTextWidth));
+            }
+        }
+        nonBulletBlocks = negBlocks;
+
         footnoteLines = font.split(Component.literal(FOOTNOTE), innerWidth);
 
         // Sum content heights + gaps to size the panel, then centre it.
@@ -106,9 +121,18 @@ public final class NetworkConsentScreen extends Screen {
         if (!bulletBlocks.isEmpty()) {
             bulletsH -= BULLET_GAP; // no trailing gap after the last bullet
         }
+        int nonBulletsH = 0;
+        for (List<FormattedCharSequence> block : nonBulletBlocks) {
+            nonBulletsH += block.size() * LINE_STEP + BULLET_GAP;
+        }
+        if (!nonBulletBlocks.isEmpty()) {
+            nonBulletsH -= BULLET_GAP; // no trailing gap after the last "won't do" line
+        }
         int contentH = font.lineHeight + GAP_TITLE
                 + bodyLines.size() * LINE_STEP + GAP_BODY
-                + bulletsH + GAP_BULLETS
+                + bulletsH
+                + (nonBulletBlocks.isEmpty() ? 0 : GAP_NEG + nonBulletsH)
+                + GAP_BULLETS
                 + footnoteLines.size() * LINE_STEP + GAP_FOOTNOTE
                 + BUTTON_H;
 
@@ -125,7 +149,13 @@ public final class NetworkConsentScreen extends Screen {
         bodyY = cursor;
         cursor += bodyLines.size() * LINE_STEP + GAP_BODY;
         bulletsY = cursor;
-        cursor += bulletsH + GAP_BULLETS;
+        cursor += bulletsH;
+        if (!nonBulletBlocks.isEmpty()) {
+            cursor += GAP_NEG;
+            nonBulletsY = cursor;
+            cursor += nonBulletsH;
+        }
+        cursor += GAP_BULLETS;
         footnoteY = cursor;
         cursor += footnoteLines.size() * LINE_STEP + GAP_FOOTNOTE;
 
@@ -183,6 +213,17 @@ public final class NetworkConsentScreen extends Screen {
                 by += LINE_STEP;
             }
             by += BULLET_GAP;
+        }
+
+        // "Won't do" lines: a red ✗ marker (where the blue dot would be) + normal bullet-grey text.
+        int ny = nonBulletsY;
+        for (List<FormattedCharSequence> block : nonBulletBlocks) {
+            graphics.drawString(font, Component.literal("✗"), innerLeft + DOT_INSET - 1, ny, COLOR_NEG, false);
+            for (FormattedCharSequence line : block) {
+                graphics.drawString(font, line, innerLeft + BULLET_TEXT_INSET, ny, COLOR_BULLET, false);
+                ny += LINE_STEP;
+            }
+            ny += BULLET_GAP;
         }
 
         int fy = footnoteY;

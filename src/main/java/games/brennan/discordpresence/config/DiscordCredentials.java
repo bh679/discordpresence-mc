@@ -140,6 +140,27 @@ public final class DiscordCredentials {
         }
     }
 
+    /**
+     * The provider's title-screen "won't do" bullets (rendered with a red ✗ marker), or an empty
+     * list when none is registered / it fails. Read on the client at title-screen time by
+     * {@code NetworkConsentScreen}.
+     */
+    public static List<String> providerNetworkConsentNonFeatures() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return List.of();
+        }
+        try {
+            List<String> value = current.networkConsentNonFeatures();
+            return value == null ? List.of() : value;
+        } catch (Throwable t) {
+            if (WARNED.compareAndSet(false, true)) {
+                LOGGER.warn("DiscordCredentialsProvider threw; ignoring its value (this warning is logged once).", t);
+            }
+            return List.of();
+        }
+    }
+
     /** The provider's presence-track user ids, or an empty list when none is registered / it fails. */
     public static List<String> providerPresenceTrackUserIds() {
         DiscordCredentialsProvider current = provider;
