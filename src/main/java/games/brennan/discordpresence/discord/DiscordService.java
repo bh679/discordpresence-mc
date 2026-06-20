@@ -814,6 +814,21 @@ public final class DiscordService {
     }
 
     /**
+     * Like {@link #postDeathReport} but posts the report <b>outside</b> the player's thread — always
+     * top-level in the channel — under the player's name/avatar, with the same composed item image.
+     * For a separate, non-threaded public death feed (a flat stream of deaths rather than per-player
+     * threads). Best-effort; all HTTP + image work runs off-thread.
+     *
+     * <p><b>Public API.</b> A bundling mod (e.g. Dungeon Train) calls this in addition to
+     * {@link #postDeathReport} when it wants both a threaded report and a top-level copy.</p>
+     */
+    public void postDeathReportTopLevel(ServerPlayer player, String title, String description,
+                                        List<DeathField> fields, List<ItemStack> iconItems) {
+        postReport(player, title, description, fields, iconItems,
+                DiscordPresenceConfig.getDeathReportEmbedColor(), true);
+    }
+
+    /**
      * Post a disconnect / "left the game" report: the same embed + composed item image as
      * {@link #postDeathReport}, but in the disconnect colour ({@code disconnectReportEmbedColor},
      * a muted grey) so it reads as a session summary, not a death.
@@ -868,6 +883,11 @@ public final class DiscordService {
      */
     private void postReport(ServerPlayer player, String title, String description,
                             List<DeathField> fields, List<ItemStack> iconItems, int color) {
+        postReport(player, title, description, fields, iconItems, color, false);
+    }
+
+    private void postReport(ServerPlayer player, String title, String description,
+                            List<DeathField> fields, List<ItemStack> iconItems, int color, boolean topLevel) {
         if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
@@ -877,7 +897,9 @@ public final class DiscordService {
         // Snapshot the icons NOW (server thread); the off-thread work below only sees URLs + counts.
         List<DeathImageComposer.IconSpec> icons =
                 DiscordPresenceConfig.isShowDeathReportImage() ? resolveIcons(iconItems) : List.of();
-        String threadId = threadStore.threadId(uuid); // player's thread, or null = top-level
+        // topLevel forces a non-threaded post (flat public death feed); otherwise into the player's
+        // thread when they have one (null → top-level anyway).
+        String threadId = topLevel ? null : threadStore.threadId(uuid);
 
         CompletableFuture
                 .supplyAsync(() -> DeathImageComposer.compose(icons), DiscordHttp.EXECUTOR)
