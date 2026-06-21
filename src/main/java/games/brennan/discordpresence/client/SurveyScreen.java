@@ -16,7 +16,9 @@ import java.util.List;
  * The feedback survey window: walks the survey questions one screen at a
  * time. A question is either a 0–N rating + an optional comment, or a comment-only text
  * question (no rating row — the text box is the sole answer). Submit sends the answer to
- * the server (which posts it to Discord) and advances to the next question. After the last
+ * the server (which posts it to Discord) and advances to the next question. Skip advances to
+ * the next question without submitting — nothing is posted for a skipped question — so a
+ * player can move past the rating to the later questions without answering it. After the last
  * question the screen closes back to the death screen. Closing early (Esc) just returns to
  * the death screen; the survey is offered again on the next death.
  */
@@ -24,6 +26,8 @@ public final class SurveyScreen extends Screen {
 
     private static final int CONTENT_WIDTH = 280;
     private static final int SUBMIT_W = 150; // centered, not full content width
+    private static final int SKIP_W = 70;    // narrower than Submit — secondary action
+    private static final int BUTTON_GAP = 8; // gap between Skip and Submit in the action row
     private static final int SCORE_GAP = 2;
     private static final int SCORE_H = 20;
     private static final int SELECT_COLOR = 0xFF55FF55;
@@ -101,11 +105,22 @@ public final class SurveyScreen extends Screen {
             commentBox = null;
         }
 
-        // Submit (+ advance) — centered, fixed width. Enabled by a score pick (scale question)
-        // or once the answer box is non-empty (text question); see the responder above.
+        // Bottom action row: Skip (left) + Submit (right), centered as a group.
         boolean last = index == questions.size() - 1;
+        int rowW = SKIP_W + BUTTON_GAP + SUBMIT_W;
+        int rowX = centerX - rowW / 2;
+
+        // Skip — always enabled. Advances without submitting, so nothing posts for this question;
+        // lets a player move past the rating to the later questions without answering it.
+        Button skipButton = Button.builder(Component.literal("Skip"), b -> skip())
+                .bounds(rowX, y, SKIP_W, 20)
+                .build();
+        addRenderableWidget(skipButton);
+
+        // Submit (+ advance). Enabled by a score pick (scale question) or once the answer box is
+        // non-empty (text question); see the responder above.
         submitButton = Button.builder(Component.literal(last ? "Submit" : "Submit & next"), b -> submit())
-                .bounds(centerX - SUBMIT_W / 2, y, SUBMIT_W, 20)
+                .bounds(rowX + SKIP_W + BUTTON_GAP, y, SUBMIT_W, 20)
                 .build();
         submitButton.active = false;
         addRenderableWidget(submitButton);
@@ -132,6 +147,11 @@ public final class SurveyScreen extends Screen {
         }
         int score = hasScale ? selectedScore : 0; // text questions carry no rating
         DPNetwork.sendToServer(new SurveySubmitPayload(q.id(), score, comment));
+        advance();
+    }
+
+    /** Advance past the current question without submitting it — nothing is posted to Discord. */
+    private void skip() {
         advance();
     }
 
