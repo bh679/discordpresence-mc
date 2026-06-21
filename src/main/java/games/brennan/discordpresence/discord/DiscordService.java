@@ -905,6 +905,34 @@ public final class DiscordService {
     }
 
     /**
+     * Like {@link #postDeathReportTopLevel(ServerPlayer, String, String, List, byte[], String)} but with
+     * a caller-supplied embed {@code color}, for a bundling mod's own top-level report type that isn't a
+     * death. {@code pngImage} null → no image; always top-level. Best-effort; HTTP runs off-thread.
+     *
+     * <p><b>Public API.</b> Dungeon Train uses this for its remote-echo encounter stories — a
+     * greyish-blue bar, distinct from the death-report red.</p>
+     */
+    public void postReportTopLevel(ServerPlayer player, String title, String description,
+                                   List<DeathField> fields, byte[] pngImage, String filename, int color) {
+        if (!enabled() || !networkAllowed(player.server)) {
+            return;
+        }
+        UUID uuid = player.getUUID();
+        String name = player.getGameProfile().getName();
+        JsonObject embed = buildReportEmbed(title, description, fields, color);
+        DiscordWebhookClient.postReport(name, uuid, null, embed, pngImage, filename, null)
+                .thenAccept(ref -> {
+                    if (ref != null) {
+                        reverse.put(ref.messageId(), uuid);
+                    }
+                })
+                .exceptionally(t -> {
+                    LOGGER.warn("Top-level report post failed: {}", t.toString());
+                    return null;
+                });
+    }
+
+    /**
      * Post a disconnect / "left the game" report: the same embed + composed item image as
      * {@link #postDeathReport}, but in the disconnect colour ({@code disconnectReportEmbedColor},
      * a muted grey) so it reads as a session summary, not a death.
