@@ -112,7 +112,22 @@ final class DiscordWebhookClient {
      */
     static CompletableFuture<DiscordMessageRef> postReport(String playerName, UUID uuid, String threadId,
                                                            JsonObject embed, byte[] png, String filename) {
-        String webhookUrl = DiscordPresenceConfig.getWebhookUrl();
+        return postReport(playerName, uuid, threadId, embed, png, filename, null);
+    }
+
+    /**
+     * As {@link #postReport(String, UUID, String, JsonObject, byte[], String)} but posts to an explicit
+     * {@code webhookOverride} (e.g. a separate public-channel cap's {@code <base>/hook}). Precedence: a
+     * dev-env override ({@code DISCORDPRESENCE_DEV_WEBHOOK_URL}) still wins for local testing; then the
+     * override; then the configured/relay webhook. Blank/null override → the default.
+     */
+    static CompletableFuture<DiscordMessageRef> postReport(String playerName, UUID uuid, String threadId,
+                                                           JsonObject embed, byte[] png, String filename,
+                                                           String webhookOverride) {
+        String webhookUrl = (webhookOverride != null && !webhookOverride.isBlank()
+                && !DiscordPresenceConfig.isDevWebhookOverrideActive())
+                ? webhookOverride
+                : DiscordPresenceConfig.getWebhookUrl();
         if (webhookUrl.isBlank()) {
             return CompletableFuture.completedFuture(null);
         }

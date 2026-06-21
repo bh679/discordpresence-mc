@@ -850,8 +850,18 @@ public final class DiscordService {
      */
     public void postDeathReportTopLevel(ServerPlayer player, String title, String description,
                                         List<DeathField> fields, List<ItemStack> iconItems) {
+        postDeathReportTopLevel(player, title, description, fields, iconItems, null);
+    }
+
+    /**
+     * As {@link #postDeathReportTopLevel(ServerPlayer, String, String, List, List)} but routes to an
+     * explicit {@code webhookOverride} (e.g. a separate public-channel cap). {@code null}/blank = the
+     * default destination. A dev-env webhook override still wins for local testing.
+     */
+    public void postDeathReportTopLevel(ServerPlayer player, String title, String description,
+                                        List<DeathField> fields, List<ItemStack> iconItems, String webhookOverride) {
         postReport(player, title, description, fields, iconItems,
-                DiscordPresenceConfig.getDeathReportEmbedColor(), true);
+                DiscordPresenceConfig.getDeathReportEmbedColor(), true, webhookOverride);
     }
 
     /**
@@ -864,6 +874,17 @@ public final class DiscordService {
      */
     public void postDeathReportTopLevel(ServerPlayer player, String title, String description,
                                         List<DeathField> fields, byte[] pngImage, String filename) {
+        postDeathReportTopLevel(player, title, description, fields, pngImage, filename, null);
+    }
+
+    /**
+     * As {@link #postDeathReportTopLevel(ServerPlayer, String, String, List, byte[], String)} but routes
+     * to an explicit {@code webhookOverride} (e.g. a separate public-channel cap). {@code null}/blank =
+     * the default destination. A dev-env webhook override still wins for local testing.
+     */
+    public void postDeathReportTopLevel(ServerPlayer player, String title, String description,
+                                        List<DeathField> fields, byte[] pngImage, String filename,
+                                        String webhookOverride) {
         if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
@@ -871,7 +892,7 @@ public final class DiscordService {
         String name = player.getGameProfile().getName();
         JsonObject embed = buildReportEmbed(title, description, fields,
                 DiscordPresenceConfig.getDeathReportEmbedColor());
-        DiscordWebhookClient.postReport(name, uuid, null, embed, pngImage, filename)
+        DiscordWebhookClient.postReport(name, uuid, null, embed, pngImage, filename, webhookOverride)
                 .thenAccept(ref -> {
                     if (ref != null) {
                         reverse.put(ref.messageId(), uuid);
@@ -938,11 +959,12 @@ public final class DiscordService {
      */
     private void postReport(ServerPlayer player, String title, String description,
                             List<DeathField> fields, List<ItemStack> iconItems, int color) {
-        postReport(player, title, description, fields, iconItems, color, false);
+        postReport(player, title, description, fields, iconItems, color, false, null);
     }
 
     private void postReport(ServerPlayer player, String title, String description,
-                            List<DeathField> fields, List<ItemStack> iconItems, int color, boolean topLevel) {
+                            List<DeathField> fields, List<ItemStack> iconItems, int color, boolean topLevel,
+                            String webhookOverride) {
         if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
@@ -962,7 +984,7 @@ public final class DiscordService {
                     LOGGER.warn("Report image compose failed: {}", t.toString());
                     return null;
                 })
-                .thenCompose(png -> DiscordWebhookClient.postReport(name, uuid, threadId, embed, png, "report.png"))
+                .thenCompose(png -> DiscordWebhookClient.postReport(name, uuid, threadId, embed, png, "report.png", webhookOverride))
                 .thenAccept(ref -> {
                     if (ref != null) {
                         reverse.put(ref.messageId(), uuid);
