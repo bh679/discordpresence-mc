@@ -974,6 +974,19 @@ public final class DiscordService {
      * comment field).</p>
      */
     public void postSurveyResponse(ServerPlayer player, String title, String description, List<DeathField> fields) {
+        postSurveyResponse(player, title, description, fields, List.of());
+    }
+
+    /**
+     * As {@link #postSurveyResponse(ServerPlayer, String, String, List)} but additionally @-mentions
+     * {@code pingUserIds} (their ids become the message {@code content} + a trusted
+     * {@code allowed_mentions.users} allow-list, so they are actually notified). <b>Only the genuine
+     * survey-answer path passes a non-empty list</b> — other callers that reuse this embed style (e.g.
+     * Dungeon Train's "entered Free Play" notice) use the 4-arg form above and never ping. An empty/null
+     * list reproduces the no-ping report exactly.
+     */
+    public void postSurveyResponse(ServerPlayer player, String title, String description,
+                                   List<DeathField> fields, List<String> pingUserIds) {
         if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
@@ -981,7 +994,8 @@ public final class DiscordService {
         String name = player.getGameProfile().getName();
         JsonObject embed = buildReportEmbed(title, description, fields, DiscordPresenceConfig.getSurveyEmbedColor());
         String threadId = threadStore.threadId(uuid); // into the player's thread when they have one (null → top-level)
-        DiscordWebhookClient.postReport(name, uuid, threadId, embed, null, null)
+        String pingContent = surveyPingContent(pingUserIds);
+        DiscordWebhookClient.postReport(name, uuid, threadId, embed, null, null, null, pingContent, pingUserIds)
                 .thenAccept(ref -> {
                     if (ref != null) {
                         reverse.put(ref.messageId(), uuid);
@@ -991,6 +1005,28 @@ public final class DiscordService {
                     LOGGER.warn("Survey response post failed: {}", t.toString());
                     return null;
                 });
+    }
+
+    /**
+     * Render the survey-ping message body from user ids — e.g. {@code ["1","2"] → "<@1> <@2>"}. Blank
+     * ids are skipped; a null/empty list (or all-blank) yields {@code null} so no {@code content} is sent.
+     * The matching {@code allowed_mentions.users} allow-list is what makes these mentions actually notify.
+     */
+    static String surveyPingContent(List<String> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String id : userIds) {
+            if (id == null || id.isBlank()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(' ');
+            }
+            sb.append("<@").append(id).append('>');
+        }
+        return sb.length() == 0 ? null : sb.toString();
     }
 
     /**

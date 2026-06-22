@@ -5,9 +5,11 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Pure-logic tests for the death-report embed, image grid math, and multipart body. */
@@ -101,5 +103,49 @@ class DiscordDeathReportTest {
         assertFalse(DiscordService.shouldPostDisconnectReport(true, false)); // left dead → death report covers it
         assertFalse(DiscordService.shouldPostDisconnectReport(false, true)); // feature off
         assertFalse(DiscordService.shouldPostDisconnectReport(false, false));
+    }
+
+    // --- survey-ping report payload ---------------------------------------
+
+    private static final UUID UID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+
+    @Test
+    void reportRootPingsListedUsersViaContentAndAllowList() {
+        JsonObject embed = DiscordService.buildReportEmbed("📋 Feedback — Steve", "Rate it", List.of(), 1);
+        JsonObject root = DiscordWebhookClient.buildReportRoot(
+                "Steve", UID, embed, "<@342110421114945537>", List.of("342110421114945537"));
+
+        assertEquals("<@342110421114945537>", root.get("content").getAsString());
+        JsonObject am = root.getAsJsonObject("allowed_mentions");
+        assertTrue(am.getAsJsonArray("parse").isEmpty()); // never parse a player-controlled name/embed
+        assertEquals("342110421114945537", am.getAsJsonArray("users").get(0).getAsString());
+        assertEquals(1, root.getAsJsonArray("embeds").size()); // embed still carried alongside the ping
+    }
+
+    @Test
+    void reportRootWithoutPingOmitsContentAndUsers() {
+        JsonObject embed = DiscordService.buildReportEmbed("t", "d", List.of(), 1);
+        JsonObject root = DiscordWebhookClient.buildReportRoot("Steve", UID, embed, null, List.of());
+
+        assertFalse(root.has("content"));                       // no content when nobody to ping
+        JsonObject am = root.getAsJsonObject("allowed_mentions");
+        assertTrue(am.getAsJsonArray("parse").isEmpty());
+        assertFalse(am.has("users"));                           // no allow-list → identical to the old report
+    }
+
+    // --- survey-ping content rendering ------------------------------------
+
+    @Test
+    void surveyPingContentRendersMentions() {
+        assertEquals("<@1> <@2>", DiscordService.surveyPingContent(List.of("1", "2")));
+        assertEquals("<@1>", DiscordService.surveyPingContent(List.of("1")));
+    }
+
+    @Test
+    void surveyPingContentNullWhenNoUsableIds() {
+        assertNull(DiscordService.surveyPingContent(List.of()));
+        assertNull(DiscordService.surveyPingContent(null));
+        assertNull(DiscordService.surveyPingContent(List.of("  ", ""))); // all blank → null
+        assertEquals("<@1>", DiscordService.surveyPingContent(List.of("", "1"))); // skips the blank id
     }
 }

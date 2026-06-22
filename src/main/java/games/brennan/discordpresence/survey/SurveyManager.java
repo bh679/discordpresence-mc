@@ -97,7 +97,10 @@ public final class SurveyManager {
             // is the optional reason for the score. Label the Discord field accordingly.
             fields.add(new DeathField(question.hasScale() ? "Comment" : "Answer", cleaned));
         }
-        DiscordService.get().postSurveyResponse(player, "📋 Feedback — " + name, question.prompt(), fields);
+        // Ping the seam's user ids ONLY here — the genuine survey-answer path. Other reusers of
+        // postSurveyResponse (e.g. DT's Free Play notice) call the no-ping 4-arg form and never mention.
+        DiscordService.get().postSurveyResponse(player, "📋 Feedback — " + name, question.prompt(), fields,
+                DiscordCredentials.providerSurveyPingUserIds());
 
         // If the player has now answered every question, the survey is complete — notify the
         // bundling mod so it can react (e.g. award an advancement). Fires on each completion;
