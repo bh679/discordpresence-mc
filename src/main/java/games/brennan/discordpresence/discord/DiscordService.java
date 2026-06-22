@@ -974,6 +974,19 @@ public final class DiscordService {
      * comment field).</p>
      */
     public void postSurveyResponse(ServerPlayer player, String title, String description, List<DeathField> fields) {
+        postSurveyResponse(player, title, description, fields, List.of());
+    }
+
+    /**
+     * As {@link #postSurveyResponse(ServerPlayer, String, String, List)} but additionally @-mentions
+     * {@code pingUserIds} (their ids become the message {@code content} + a trusted
+     * {@code allowed_mentions.users} allow-list, so they are actually notified). <b>Only the genuine
+     * survey-answer path passes a non-empty list</b> — other callers that reuse this embed style (e.g.
+     * Dungeon Train's "entered Free Play" notice) use the 4-arg form above and never ping. An empty/null
+     * list reproduces the no-ping report exactly.
+     */
+    public void postSurveyResponse(ServerPlayer player, String title, String description,
+                                   List<DeathField> fields, List<String> pingUserIds) {
         if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
@@ -981,12 +994,8 @@ public final class DiscordService {
         String name = player.getGameProfile().getName();
         JsonObject embed = buildReportEmbed(title, description, fields, DiscordPresenceConfig.getSurveyEmbedColor());
         String threadId = threadStore.threadId(uuid); // into the player's thread when they have one (null → top-level)
-        // Optional ping: a bundling mod can ask to be @-mentioned on each submitted answer (e.g. Dungeon
-        // Train pings its maintainer on incoming feedback). Read the trusted seam on this (server) thread;
-        // an empty list → null content + no allow-list, so the post is byte-identical to the old no-ping one.
-        List<String> pingIds = DiscordCredentials.providerSurveyPingUserIds();
-        String pingContent = surveyPingContent(pingIds);
-        DiscordWebhookClient.postReport(name, uuid, threadId, embed, null, null, null, pingContent, pingIds)
+        String pingContent = surveyPingContent(pingUserIds);
+        DiscordWebhookClient.postReport(name, uuid, threadId, embed, null, null, null, pingContent, pingUserIds)
                 .thenAccept(ref -> {
                     if (ref != null) {
                         reverse.put(ref.messageId(), uuid);
