@@ -914,13 +914,28 @@ public final class DiscordService {
      */
     public void postReportTopLevel(ServerPlayer player, String title, String description,
                                    List<DeathField> fields, byte[] pngImage, String filename, int color) {
+        postReportTopLevel(player, title, description, fields, pngImage, filename, color, null);
+    }
+
+    /**
+     * As {@link #postReportTopLevel(ServerPlayer, String, String, List, byte[], String, int)} but routes
+     * to an explicit {@code webhookOverride} (e.g. a separate public-channel cap). {@code null}/blank =
+     * the default destination. A dev-env webhook override still wins for local testing.
+     *
+     * <p><b>Public API.</b> Lets a bundling mod send its coloured top-level report to the same public
+     * feed as the death manifest — e.g. Dungeon Train routes its remote-echo encounter story to the
+     * public death-report channel while keeping the greyish-blue bar.</p>
+     */
+    public void postReportTopLevel(ServerPlayer player, String title, String description,
+                                   List<DeathField> fields, byte[] pngImage, String filename, int color,
+                                   String webhookOverride) {
         if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
         UUID uuid = player.getUUID();
         String name = player.getGameProfile().getName();
         JsonObject embed = buildReportEmbed(title, description, fields, color);
-        DiscordWebhookClient.postReport(name, uuid, null, embed, pngImage, filename, null)
+        DiscordWebhookClient.postReport(name, uuid, null, embed, pngImage, filename, webhookOverride)
                 .thenAccept(ref -> {
                     if (ref != null) {
                         reverse.put(ref.messageId(), uuid);
