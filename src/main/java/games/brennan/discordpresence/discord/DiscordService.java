@@ -981,7 +981,12 @@ public final class DiscordService {
         String name = player.getGameProfile().getName();
         JsonObject embed = buildReportEmbed(title, description, fields, DiscordPresenceConfig.getSurveyEmbedColor());
         String threadId = threadStore.threadId(uuid); // into the player's thread when they have one (null → top-level)
-        DiscordWebhookClient.postReport(name, uuid, threadId, embed, null, null)
+        // Optional ping: a bundling mod can ask to be @-mentioned on each submitted answer (e.g. Dungeon
+        // Train pings its maintainer on incoming feedback). Read the trusted seam on this (server) thread;
+        // an empty list → null content + no allow-list, so the post is byte-identical to the old no-ping one.
+        List<String> pingIds = DiscordCredentials.providerSurveyPingUserIds();
+        String pingContent = surveyPingContent(pingIds);
+        DiscordWebhookClient.postReport(name, uuid, threadId, embed, null, null, null, pingContent, pingIds)
                 .thenAccept(ref -> {
                     if (ref != null) {
                         reverse.put(ref.messageId(), uuid);
@@ -991,6 +996,28 @@ public final class DiscordService {
                     LOGGER.warn("Survey response post failed: {}", t.toString());
                     return null;
                 });
+    }
+
+    /**
+     * Render the survey-ping message body from user ids — e.g. {@code ["1","2"] → "<@1> <@2>"}. Blank
+     * ids are skipped; a null/empty list (or all-blank) yields {@code null} so no {@code content} is sent.
+     * The matching {@code allowed_mentions.users} allow-list is what makes these mentions actually notify.
+     */
+    static String surveyPingContent(List<String> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String id : userIds) {
+            if (id == null || id.isBlank()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(' ');
+            }
+            sb.append("<@").append(id).append('>');
+        }
+        return sb.length() == 0 ? null : sb.toString();
     }
 
     /**
