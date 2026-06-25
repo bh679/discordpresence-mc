@@ -9,11 +9,11 @@ import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
+import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -35,7 +35,6 @@ final class DiscordGateway implements GatewayConnection {
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final String GATEWAY_BOT_URL = "https://discord.com/api/v10/gateway/bot";
-    private static final long MAX_BACKOFF_SECONDS = 60;
 
     private final String token;
     private final int intents;
@@ -53,7 +52,8 @@ final class DiscordGateway implements GatewayConnection {
 
     private final AtomicBoolean heartbeatAckPending = new AtomicBoolean(false);
     private final AtomicBoolean reconnecting = new AtomicBoolean(false);
-    private final AtomicInteger reconnectAttempts = new AtomicInteger(0);
+    /** Backoff / stable-uptime reset / circuit-breaker policy — the reconnect-storm guard. */
+    private final ReconnectPolicy reconnectPolicy = new ReconnectPolicy();
     /** Serialises all WebSocket sends — {@code sendText} throws if a send is already pending. */
     private final AtomicReference<CompletableFuture<WebSocket>> lastSend =
             new AtomicReference<>(CompletableFuture.completedFuture(null));
@@ -174,14 +174,22 @@ final class DiscordGateway implements GatewayConnection {
                 // best-effort
             }
         }
-        long delay = backoffSeconds();
-        LOGGER.info("Discord gateway reconnecting in {}s (resume={}).", delay, resume);
-        DiscordHttp.SCHEDULER.schedule(() -> connect(resume), delay, TimeUnit.SECONDS);
-    }
-
-    private long backoffSeconds() {
-        int attempt = reconnectAttempts.getAndIncrement();
-        return Math.min(MAX_BACKOFF_SECONDS, 1L << Math.min(attempt, 6)); // 1,2,4,…,64 → capped 60
+        // Circuit breaker: a connection that never stabilises (e.g. a persistently rejected token,
+        // an unreachable gateway) must not reconnect forever — that is exactly what got the bot
+        // token reset. An empty result means give up and require operator action (same shape as a
+        // fatal close); the stable-uptime reset is applied inside, so only sustained failure trips it.
+        OptionalLong delay = reconnectPolicy.nextBackoffMillis();
+        if (delay.isEmpty()) {
+            LOGGER.error("Discord gateway giving up after {} consecutive failed reconnects without a "
+                    + "stable session — check 'botToken' / network. Gateway disabled until restart.",
+                    ReconnectPolicy.MAX_CONSECUTIVE_ATTEMPTS);
+            running = false;
+            reconnecting.set(false);
+            return;
+        }
+        long delayMs = delay.getAsLong();
+        LOGGER.info("Discord gateway reconnecting in {}s (resume={}).", delayMs / 1000.0, resume);
+        DiscordHttp.SCHEDULER.schedule(() -> connect(resume), delayMs, TimeUnit.MILLISECONDS);
     }
 
     private CompletableFuture<String> fetchGatewayUrl() {
@@ -272,6 +280,10 @@ final class DiscordGateway implements GatewayConnection {
     void onOpen(WebSocket ws) {
         this.webSocket = ws;
         this.lastSend.set(CompletableFuture.completedFuture(ws));
+        // Mark the start of a candidate stable session. The backoff counter is NOT reset here — the
+        // socket must survive ReconnectPolicy.STABLE_SESSION_MILLIS before a later drop resets it,
+        // so a flapping connection can never restart backoff at the floor.
+        reconnectPolicy.onConnectionOpened();
     }
 
     void onText(String text) {
@@ -321,16 +333,12 @@ final class DiscordGateway implements GatewayConnection {
         }
         switch (type) {
             case "READY" -> {
-                reconnectAttempts.set(0);
                 JsonObject d = payload.getAsJsonObject("d");
                 sessionId = d.has("session_id") ? d.get("session_id").getAsString() : null;
                 resumeGatewayUrl = d.has("resume_gateway_url") ? d.get("resume_gateway_url").getAsString() : null;
                 LOGGER.info("Discord gateway READY — listening for replies/threads.");
             }
-            case "RESUMED" -> {
-                reconnectAttempts.set(0);
-                LOGGER.info("Discord gateway RESUMED.");
-            }
+            case "RESUMED" -> LOGGER.info("Discord gateway RESUMED.");
             case "MESSAGE_CREATE" -> {
                 try {
                     onMessage.accept(GatewayPayloads.message(payload.getAsJsonObject("d")));
