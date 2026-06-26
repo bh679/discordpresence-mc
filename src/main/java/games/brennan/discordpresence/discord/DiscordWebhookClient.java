@@ -92,8 +92,7 @@ final class DiscordWebhookClient {
                 .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
                 .build();
 
-        return DiscordHttp.CLIENT
-                .sendAsync(req, HttpResponse.BodyHandlers.ofString())
+        return DiscordHttp.sendWithRetry(req)
                 .thenApply(DiscordWebhookClient::parseMessageRef)
                 .exceptionally(t -> {
                     LOGGER.warn("Discord webhook POST failed: {}", t.toString());
@@ -172,8 +171,7 @@ final class DiscordWebhookClient {
                     .build();
         }
 
-        return DiscordHttp.CLIENT
-                .sendAsync(req, HttpResponse.BodyHandlers.ofString())
+        return DiscordHttp.sendWithRetry(req)
                 .thenApply(DiscordWebhookClient::parseMessageRef)
                 .exceptionally(t -> {
                     LOGGER.warn("Discord webhook report POST failed: {}", t.toString());
