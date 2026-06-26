@@ -92,8 +92,7 @@ final class DiscordWebhookClient {
                 .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
                 .build();
 
-        return DiscordHttp.CLIENT
-                .sendAsync(req, HttpResponse.BodyHandlers.ofString())
+        return DiscordHttp.sendWithRetry(req)
                 .thenApply(DiscordWebhookClient::parseMessageRef)
                 .exceptionally(t -> {
                     LOGGER.warn("Discord webhook POST failed: {}", t.toString());
@@ -124,6 +123,19 @@ final class DiscordWebhookClient {
     static CompletableFuture<DiscordMessageRef> postReport(String playerName, UUID uuid, String threadId,
                                                            JsonObject embed, byte[] png, String filename,
                                                            String webhookOverride) {
+        return postReport(playerName, uuid, threadId, embed, png, filename, webhookOverride, null, List.of());
+    }
+
+    /**
+     * As {@link #postReport(String, UUID, String, JsonObject, byte[], String, String)} but also carries a
+     * {@code content} body and a trusted {@code allowedUserIds} ping allow-list — used by the survey
+     * response so a bundling mod's maintainer is @-mentioned on each submitted answer. A blank/null
+     * {@code content} with an empty {@code allowedUserIds} reproduces the default no-ping report exactly.
+     */
+    static CompletableFuture<DiscordMessageRef> postReport(String playerName, UUID uuid, String threadId,
+                                                           JsonObject embed, byte[] png, String filename,
+                                                           String webhookOverride, String content,
+                                                           List<String> allowedUserIds) {
         String webhookUrl = (webhookOverride != null && !webhookOverride.isBlank()
                 && !DiscordPresenceConfig.isDevWebhookOverrideActive())
                 ? webhookOverride
@@ -137,19 +149,7 @@ final class DiscordWebhookClient {
             embed.add("image", image);
         }
 
-        JsonObject root = new JsonObject();
-        String username = safeUsername(playerName);
-        if (username != null) {
-            root.addProperty("username", username);
-        }
-        root.addProperty("avatar_url", "https://mc-heads.net/avatar/" + uuid + "/64");
-        JsonArray embeds = new JsonArray();
-        embeds.add(embed);
-        root.add("embeds", embeds);
-        // Never ping anyone from a player-controlled name/template.
-        JsonObject allowedMentions = new JsonObject();
-        allowedMentions.add("parse", new JsonArray());
-        root.add("allowed_mentions", allowedMentions);
+        JsonObject root = buildReportRoot(playerName, uuid, embed, content, allowedUserIds);
 
         String url = withQuery(webhookUrl, threadId);
         HttpRequest req;
@@ -171,13 +171,47 @@ final class DiscordWebhookClient {
                     .build();
         }
 
-        return DiscordHttp.CLIENT
-                .sendAsync(req, HttpResponse.BodyHandlers.ofString())
+        return DiscordHttp.sendWithRetry(req)
                 .thenApply(DiscordWebhookClient::parseMessageRef)
                 .exceptionally(t -> {
                     LOGGER.warn("Discord webhook report POST failed: {}", t.toString());
                     return null;
                 });
+    }
+
+    /**
+     * Build the report webhook JSON root: the player username/avatar, the single embed, an optional
+     * {@code content} body, and the {@code allowed_mentions} block. Mention <i>parsing</i> is always
+     * suppressed (a player-controlled name/embed can never ping); only the trusted caller-supplied
+     * {@code allowedUserIds} are added to the {@code users} allow-list (e.g. the survey ping). A
+     * blank/null {@code content} omits the content field; an empty/null id list yields {@code parse:[]}
+     * only — i.e. the historical no-ping report. Pure (no I/O) so it is unit-testable.
+     */
+    static JsonObject buildReportRoot(String playerName, UUID uuid, JsonObject embed,
+                                      String content, List<String> allowedUserIds) {
+        JsonObject root = new JsonObject();
+        String username = safeUsername(playerName);
+        if (username != null) {
+            root.addProperty("username", username);
+        }
+        root.addProperty("avatar_url", "https://mc-heads.net/avatar/" + uuid + "/64");
+        JsonArray embeds = new JsonArray();
+        embeds.add(embed);
+        root.add("embeds", embeds);
+        if (content != null && !content.isBlank()) {
+            root.addProperty("content", content);
+        }
+        JsonObject allowedMentions = new JsonObject();
+        allowedMentions.add("parse", new JsonArray());
+        if (allowedUserIds != null && !allowedUserIds.isEmpty()) {
+            JsonArray users = new JsonArray();
+            for (String id : allowedUserIds) {
+                users.add(id);
+            }
+            allowedMentions.add("users", users);
+        }
+        root.add("allowed_mentions", allowedMentions);
+        return root;
     }
 
     /**

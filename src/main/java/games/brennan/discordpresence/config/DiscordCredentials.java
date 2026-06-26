@@ -178,6 +178,23 @@ public final class DiscordCredentials {
         }
     }
 
+    /** The provider's survey-ping user ids, or an empty list when none is registered / it fails. */
+    public static List<String> providerSurveyPingUserIds() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return List.of();
+        }
+        try {
+            List<String> value = current.surveyPingUserIds();
+            return value == null ? List.of() : value;
+        } catch (Throwable t) {
+            if (WARNED.compareAndSet(false, true)) {
+                LOGGER.warn("DiscordCredentialsProvider threw; ignoring its value (this warning is logged once).", t);
+            }
+            return List.of();
+        }
+    }
+
     /**
      * The provider's extra advancement message-suffix line for this player / advancement, or {@code ""}
      * when none is registered / it fails. Reuses {@link #read}'s null- and throwable-safe contract.

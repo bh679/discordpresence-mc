@@ -157,4 +157,16 @@ public interface DiscordCredentialsProvider {
      */
     default void onSurveyCompleted(UUID playerId, String playerName) {
     }
+
+    /**
+     * Discord user ids to @-mention (ping) on <i>every</i> submitted survey answer — DP adds them to
+     * the survey-response message's {@code content} with a trusted {@code allowed_mentions.users}
+     * allow-list, so the listed users are actually notified each time a player posts feedback. A
+     * bundling mod returns its maintainer's id here to be alerted to incoming feedback; standalone DP
+     * returns the default empty list (no ping, message unchanged). Read on the server thread per
+     * answer. Like the other seams it MUST NOT throw (a thrown exception is swallowed).
+     */
+    default List<String> surveyPingUserIds() {
+        return List.of();
+    }
 }

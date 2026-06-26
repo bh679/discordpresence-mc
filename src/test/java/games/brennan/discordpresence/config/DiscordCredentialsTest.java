@@ -115,6 +115,30 @@ class DiscordCredentialsTest {
     }
 
     @Test
+    void surveyPingUserIds_defaultEmpty_nullAndThrowSafe() {
+        DiscordCredentials.register(null);
+        assertTrue(DiscordCredentials.providerSurveyPingUserIds().isEmpty());
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public List<String> surveyPingUserIds() { return null; }
+        });
+        assertTrue(DiscordCredentials.providerSurveyPingUserIds().isEmpty()); // null → empty
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public List<String> surveyPingUserIds() { throw new RuntimeException("boom"); }
+        });
+        assertTrue(DiscordCredentials.providerSurveyPingUserIds().isEmpty()); // throw → empty
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public List<String> surveyPingUserIds() { return List.of("342110421114945537"); }
+        });
+        assertEquals(List.of("342110421114945537"), DiscordCredentials.providerSurveyPingUserIds());
+    }
+
+    @Test
     void advancementSuffix_defaultBlank_nullAndThrowSafe() {
         UUID player = UUID.randomUUID();
 

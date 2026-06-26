@@ -911,6 +911,49 @@ public final class DiscordService {
     }
 
     /**
+     * Like {@link #postDeathReportTopLevel(ServerPlayer, String, String, List, byte[], String)} but with
+     * a caller-supplied embed {@code color}, for a bundling mod's own top-level report type that isn't a
+     * death. {@code pngImage} null → no image; always top-level. Best-effort; HTTP runs off-thread.
+     *
+     * <p><b>Public API.</b> Dungeon Train uses this for its remote-echo encounter stories — a
+     * greyish-blue bar, distinct from the death-report red.</p>
+     */
+    public void postReportTopLevel(ServerPlayer player, String title, String description,
+                                   List<DeathField> fields, byte[] pngImage, String filename, int color) {
+        postReportTopLevel(player, title, description, fields, pngImage, filename, color, null);
+    }
+
+    /**
+     * As {@link #postReportTopLevel(ServerPlayer, String, String, List, byte[], String, int)} but routes
+     * to an explicit {@code webhookOverride} (e.g. a separate public-channel cap). {@code null}/blank =
+     * the default destination. A dev-env webhook override still wins for local testing.
+     *
+     * <p><b>Public API.</b> Lets a bundling mod send its coloured top-level report to the same public
+     * feed as the death manifest — e.g. Dungeon Train routes its remote-echo encounter story to the
+     * public death-report channel while keeping the greyish-blue bar.</p>
+     */
+    public void postReportTopLevel(ServerPlayer player, String title, String description,
+                                   List<DeathField> fields, byte[] pngImage, String filename, int color,
+                                   String webhookOverride) {
+        if (!enabled() || !networkAllowed(player.server)) {
+            return;
+        }
+        UUID uuid = player.getUUID();
+        String name = player.getGameProfile().getName();
+        JsonObject embed = buildReportEmbed(title, description, fields, color);
+        DiscordWebhookClient.postReport(name, uuid, null, embed, pngImage, filename, webhookOverride)
+                .thenAccept(ref -> {
+                    if (ref != null) {
+                        reverse.put(ref.messageId(), uuid);
+                    }
+                })
+                .exceptionally(t -> {
+                    LOGGER.warn("Top-level report post failed: {}", t.toString());
+                    return null;
+                });
+    }
+
+    /**
      * Post a disconnect / "left the game" report: the same embed + composed item image as
      * {@link #postDeathReport}, but in the disconnect colour ({@code disconnectReportEmbedColor},
      * a muted grey) so it reads as a session summary, not a death.
@@ -937,6 +980,19 @@ public final class DiscordService {
      * comment field).</p>
      */
     public void postSurveyResponse(ServerPlayer player, String title, String description, List<DeathField> fields) {
+        postSurveyResponse(player, title, description, fields, List.of());
+    }
+
+    /**
+     * As {@link #postSurveyResponse(ServerPlayer, String, String, List)} but additionally @-mentions
+     * {@code pingUserIds} (their ids become the message {@code content} + a trusted
+     * {@code allowed_mentions.users} allow-list, so they are actually notified). <b>Only the genuine
+     * survey-answer path passes a non-empty list</b> — other callers that reuse this embed style (e.g.
+     * Dungeon Train's "entered Free Play" notice) use the 4-arg form above and never ping. An empty/null
+     * list reproduces the no-ping report exactly.
+     */
+    public void postSurveyResponse(ServerPlayer player, String title, String description,
+                                   List<DeathField> fields, List<String> pingUserIds) {
         if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
@@ -944,7 +1000,8 @@ public final class DiscordService {
         String name = player.getGameProfile().getName();
         JsonObject embed = buildReportEmbed(title, description, fields, DiscordPresenceConfig.getSurveyEmbedColor());
         String threadId = threadStore.threadId(uuid); // into the player's thread when they have one (null → top-level)
-        DiscordWebhookClient.postReport(name, uuid, threadId, embed, null, null)
+        String pingContent = surveyPingContent(pingUserIds);
+        DiscordWebhookClient.postReport(name, uuid, threadId, embed, null, null, null, pingContent, pingUserIds)
                 .thenAccept(ref -> {
                     if (ref != null) {
                         reverse.put(ref.messageId(), uuid);
@@ -954,6 +1011,28 @@ public final class DiscordService {
                     LOGGER.warn("Survey response post failed: {}", t.toString());
                     return null;
                 });
+    }
+
+    /**
+     * Render the survey-ping message body from user ids — e.g. {@code ["1","2"] → "<@1> <@2>"}. Blank
+     * ids are skipped; a null/empty list (or all-blank) yields {@code null} so no {@code content} is sent.
+     * The matching {@code allowed_mentions.users} allow-list is what makes these mentions actually notify.
+     */
+    static String surveyPingContent(List<String> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String id : userIds) {
+            if (id == null || id.isBlank()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(' ');
+            }
+            sb.append("<@").append(id).append('>');
+        }
+        return sb.length() == 0 ? null : sb.toString();
     }
 
     /**
