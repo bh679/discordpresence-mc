@@ -82,11 +82,12 @@ class GatewayPayloadsTest {
     @Test
     void parsesMessageCreateFields() {
         String json = "{\"content\":\"hi there\",\"channel_id\":\"chan99\","
-                + "\"author\":{\"username\":\"alice\",\"global_name\":\"Alice\"},"
+                + "\"author\":{\"id\":\"4242\",\"username\":\"alice\",\"global_name\":\"Alice\"},"
                 + "\"message_reference\":{\"message_id\":\"msg42\"}}";
         InboundMessage m = GatewayPayloads.message(parse(json));
         assertEquals("hi there", m.content());
         assertEquals("chan99", m.channelId());
+        assertEquals("4242", m.authorId()); // Discord user id, for host-mod author matching
         assertEquals("Alice", m.authorName()); // prefers global_name over username
         assertEquals("msg42", m.referencedMessageId());
         assertFalse(m.bot());

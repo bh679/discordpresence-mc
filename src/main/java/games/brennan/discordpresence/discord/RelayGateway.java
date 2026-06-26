@@ -178,6 +178,7 @@ final class RelayGateway implements GatewayConnection, WebSocket.Listener {
     static InboundMessage parse(String json) {
         JsonObject o = JsonParser.parseString(json).getAsJsonObject();
         return new InboundMessage(
+                str(o, "authorId", ""), // forward-compatible: present once the relay forwards it
                 str(o, "authorName", ""),
                 str(o, "content", ""),
                 boolOf(o, "bot"),

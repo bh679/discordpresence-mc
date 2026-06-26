@@ -12,6 +12,7 @@ package games.brennan.discordpresence.discord;
  * {@link PlayerMessageIndex} lookup.</p>
  */
 record InboundMessage(
+        String authorId,
         String authorName,
         String content,
         boolean bot,
