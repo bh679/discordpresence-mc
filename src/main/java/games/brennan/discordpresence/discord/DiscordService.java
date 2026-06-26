@@ -2,6 +2,7 @@ package games.brennan.discordpresence.discord;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import games.brennan.discordpresence.compat.InboundDiscordHooks;
 import com.mojang.logging.LogUtils;
 import games.brennan.discordpresence.config.DiscordCredentials;
 import games.brennan.discordpresence.config.DiscordPresenceClientConfig;
@@ -476,6 +477,11 @@ public final class DiscordService {
             LOGGER.debug("Discord inbound: author={}, ref={}, channel={}, bot={}, webhook={}, anchored={}",
                     msg.authorName(), msg.referencedMessageId(), msg.channelId(), msg.bot(), msg.hasWebhookId(),
                     reverse.contains(msg.referencedMessageId()) || reverse.contains(msg.channelId()));
+        }
+        // Notify host-mod observers of every human message (before the relay-anchor gate), so a
+        // bundler can react to a Discord user — e.g. the dev — even on an unanchored message.
+        if (msg != null && !msg.isOwnOrBot()) {
+            InboundDiscordHooks.fire(msg.authorId(), msg.authorName(), msg.content());
         }
         if (!isRelayable(msg, reverse)) {
             return; // our own posts/bots, or not anchored to a tracked player message

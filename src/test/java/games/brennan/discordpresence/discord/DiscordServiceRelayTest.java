@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DiscordServiceRelayTest {
 
     private static InboundMessage msg(String channelId, String refId, boolean bot, boolean webhook) {
-        return new InboundMessage("alice", "hello", bot, webhook, channelId, refId);
+        return new InboundMessage("100", "alice", "hello", bot, webhook, channelId, refId);
     }
 
     @Test

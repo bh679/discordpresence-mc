@@ -149,10 +149,12 @@ final class GatewayPayloads {
         String content = strOr(d, "content", "");
         String channelId = str(d, "channel_id");
 
+        String authorId = "";
         String authorName = "";
         boolean bot = false;
         if (d.has("author") && d.get("author").isJsonObject()) {
             JsonObject author = d.getAsJsonObject("author");
+            authorId = strOr(author, "id", "");
             String global = str(author, "global_name");
             String username = strOr(author, "username", "");
             authorName = (global != null && !global.isBlank()) ? global : username;
@@ -166,7 +168,7 @@ final class GatewayPayloads {
             referencedMessageId = str(d.getAsJsonObject("message_reference"), "message_id");
         }
 
-        return new InboundMessage(authorName, content, bot, hasWebhookId, channelId, referencedMessageId);
+        return new InboundMessage(authorId, authorName, content, bot, hasWebhookId, channelId, referencedMessageId);
     }
 
     /**
