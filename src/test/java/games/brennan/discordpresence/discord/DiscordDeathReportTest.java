@@ -60,6 +60,35 @@ class DiscordDeathReportTest {
         assertTrue(body.endsWith("--BOUND--\r\n"), "closing boundary");
     }
 
+    @Test
+    void multipartBodyCarriesMultipleFilePartsInOrder() {
+        MultipartBody mb = MultipartBody.jsonWithFiles("BOUND", "{\"content\":\"logs\"}", List.of(
+                new MultipartBody.FilePart("files[0]", "latest.log.gz", "application/gzip", new byte[]{1, 2, 3}),
+                new MultipartBody.FilePart("files[1]", "crash.txt", "text/plain",
+                        "boom".getBytes(StandardCharsets.UTF_8))));
+
+        String body = new String(mb.body(), StandardCharsets.ISO_8859_1);
+        assertTrue(body.contains("name=\"payload_json\""), "payload_json part");
+        assertTrue(body.contains("name=\"files[0]\"; filename=\"latest.log.gz\""), "first file header");
+        assertTrue(body.contains("Content-Type: application/gzip"), "gzip content-type");
+        assertTrue(body.contains("name=\"files[1]\"; filename=\"crash.txt\""), "second file header");
+        assertTrue(body.contains("Content-Type: text/plain"), "text content-type");
+        assertTrue(body.indexOf("files[0]") < body.indexOf("files[1]"), "files kept in order");
+        assertTrue(body.endsWith("--BOUND--\r\n"), "closing boundary");
+    }
+
+    @Test
+    void contentRootCarriesContentAndSuppressesMentionParsing() {
+        JsonObject root = DiscordWebhookClient.buildContentRoot(
+                "Steve", UID, "🐛 logs: latest.log.gz", List.of());
+
+        assertEquals("🐛 logs: latest.log.gz", root.get("content").getAsString());
+        assertFalse(root.has("embeds"), "attachment message carries no embed");
+        JsonObject am = root.getAsJsonObject("allowed_mentions");
+        assertTrue(am.getAsJsonArray("parse").isEmpty(), "never parse a player-controlled content line");
+        assertFalse(am.has("users"), "no ping allow-list by default");
+    }
+
     // --- embed building ----------------------------------------------------
 
     @Test

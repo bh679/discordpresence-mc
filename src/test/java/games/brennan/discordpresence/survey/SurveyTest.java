@@ -1,5 +1,6 @@
 package games.brennan.discordpresence.survey;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 
@@ -125,6 +126,47 @@ class SurveyTest {
         SurveyQuestion q = SurveyQuestionLoader.parse("test:change", o);
         assertFalse(q.hasScale(), "scale:false → no rating scale");
         assertTrue(q.allowComment(), "a text question always allows the (answer) comment");
+    }
+
+    @Test
+    void choiceQuestionModelsOptionsAsAScale() {
+        SurveyQuestion q = SurveyQuestion.choice("test:bug", "Any bugs?",
+                List.of("The Train Disappeared", "Lag", "Other", "No"), true);
+        assertTrue(q.isChoice(), "a question with options is a choice question");
+        assertTrue(q.hasScale(), "choice reuses the scale path so the index can be submitted");
+        assertEquals(0, q.scaleMin());
+        assertEquals(3, q.scaleMax(), "scaleMax is options.size()-1");
+        assertEquals(List.of("The Train Disappeared", "Lag", "Other", "No"), q.options());
+        assertTrue(q.allowComment());
+    }
+
+    @Test
+    void choiceQuestionRejectsEmptyOptions() {
+        assertThrows(IllegalArgumentException.class,
+                () -> SurveyQuestion.choice("test:bad", "Q", List.of(), true));
+    }
+
+    @Test
+    void plainQuestionIsNotAChoice() {
+        assertFalse(SurveyQuestion.nps("test:n", "NPS").isChoice());
+        assertFalse(SurveyQuestion.text("test:t", "T").isChoice());
+    }
+
+    @Test
+    void loaderParsesChoiceQuestionFromOptions() {
+        JsonObject o = new JsonObject();
+        o.addProperty("prompt", "Did you face any bugs in this run?");
+        JsonArray options = new JsonArray();
+        options.add("The Train Disappeared");
+        options.add("Lag");
+        options.add("Other");
+        options.add("No");
+        o.add("options", options);
+        SurveyQuestion q = SurveyQuestionLoader.parse("dungeontrain:bug_report", o);
+        assertTrue(q.isChoice(), "options[] → a choice question");
+        assertEquals(4, q.options().size());
+        assertEquals("The Train Disappeared", q.options().get(0));
+        assertTrue(q.allowComment(), "allow_comment defaults to true");
     }
 
     @Test

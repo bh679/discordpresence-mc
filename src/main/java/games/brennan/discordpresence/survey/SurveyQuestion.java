@@ -1,9 +1,13 @@
 package games.brennan.discordpresence.survey;
 
+import java.util.List;
+
 /**
  * One survey question. Usually a prompt answered on a 0–N rating scale with an optional
  * free-text comment; alternatively a comment-only "text" question (no rating scale), where the
- * free-text box is the sole answer — see {@link #text} and {@link #hasScale()}.
+ * free-text box is the sole answer — see {@link #text} and {@link #hasScale()}; or a
+ * multiple-choice question whose rating tiles are labelled by {@link #options()} — see
+ * {@link #choice} and {@link #isChoice()}.
  *
  * <p>The prompt is a plain {@link String} (not a translatable component), so the
  * SAME text drives both the in-game survey UI and the Discord embed field. This
@@ -23,8 +27,12 @@ package games.brennan.discordpresence.survey;
  *                     {@code allowComment} must be true)
  * @param allowComment whether a free-text comment box is offered (optional for a scale
  *                     question; the required, sole answer for a text question)
+ * @param options      multiple-choice labels; non-empty makes this a choice question (the
+ *                     submitted score is the chosen 0-based index into this list). Empty for
+ *                     plain scale/text questions.
  */
-public record SurveyQuestion(String id, String prompt, int scaleMin, int scaleMax, boolean allowComment) {
+public record SurveyQuestion(String id, String prompt, int scaleMin, int scaleMax, boolean allowComment,
+                             List<String> options) {
 
     public SurveyQuestion {
         if (id == null || id.isBlank()) {
@@ -39,6 +47,12 @@ public record SurveyQuestion(String id, String prompt, int scaleMin, int scaleMa
             throw new IllegalArgumentException("a question with no rating scale (scaleMax " + scaleMax
                     + " < scaleMin " + scaleMin + ") must allow a comment");
         }
+        options = options == null ? List.of() : List.copyOf(options);
+    }
+
+    /** Back-compat constructor: a scale/text question with no multiple-choice options. */
+    public SurveyQuestion(String id, String prompt, int scaleMin, int scaleMax, boolean allowComment) {
+        this(id, prompt, scaleMin, scaleMax, allowComment, List.of());
     }
 
     /** The common 0–10 NPS-style question with an optional comment. */
@@ -55,9 +69,29 @@ public record SurveyQuestion(String id, String prompt, int scaleMin, int scaleMa
         return new SurveyQuestion(id, prompt, 0, -1, true);
     }
 
+    /**
+     * A multiple-choice question: the player picks exactly one of {@code options}; the chosen
+     * 0-based index travels in the submit's {@code score}. Modelled as a rating scale of
+     * {@code [0, options.size()-1]} so it reuses the existing score wire + selection path; the UI
+     * renders the option labels instead of the numbers, and Discord posts the chosen label.
+     *
+     * @param allowComment whether to also offer a free-text comment box alongside the choices
+     */
+    public static SurveyQuestion choice(String id, String prompt, List<String> options, boolean allowComment) {
+        if (options == null || options.isEmpty()) {
+            throw new IllegalArgumentException("a choice question must have at least one option");
+        }
+        return new SurveyQuestion(id, prompt, 0, options.size() - 1, allowComment, List.copyOf(options));
+    }
+
     /** Whether this question has a rating scale; {@code false} for a comment-only text question. */
     public boolean hasScale() {
         return scaleMax >= scaleMin;
+    }
+
+    /** Whether this is a multiple-choice question (its rating tiles are labelled by {@link #options()}). */
+    public boolean isChoice() {
+        return !options.isEmpty();
     }
 
     /** Clamp a submitted score into this question's {@code [scaleMin, scaleMax]} range. */

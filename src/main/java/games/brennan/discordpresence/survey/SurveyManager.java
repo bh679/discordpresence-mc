@@ -89,13 +89,19 @@ public final class SurveyManager {
 
         String name = player.getGameProfile().getName();
         List<DeathField> fields = new ArrayList<>();
-        if (question.hasScale()) {
+        if (question.isChoice()) {
+            // Multiple-choice: the score is the chosen 0-based index; post the option label.
+            int idx = Math.max(0, Math.min(question.options().size() - 1, score));
+            fields.add(new DeathField("Answer", question.options().get(idx)));
+        } else if (question.hasScale()) {
             fields.add(new DeathField("Rating", question.clampScore(score) + " / " + question.scaleMax()));
         }
         if (!cleaned.isBlank()) {
-            // For a text (no-scale) question the comment IS the answer; for a scale question it
-            // is the optional reason for the score. Label the Discord field accordingly.
-            fields.add(new DeathField(question.hasScale() ? "Comment" : "Answer", cleaned));
+            // For a text (no-scale) question the comment IS the answer; for a choice question it is
+            // extra detail; for a scale question it is the optional reason for the score. Label the
+            // Discord field accordingly.
+            String label = question.isChoice() ? "Details" : (question.hasScale() ? "Comment" : "Answer");
+            fields.add(new DeathField(label, cleaned));
         }
         // Ping the seam's user ids ONLY here — the genuine survey-answer path. Other reusers of
         // postSurveyResponse (e.g. DT's Free Play notice) call the no-ping 4-arg form and never mention.
@@ -119,7 +125,8 @@ public final class SurveyManager {
     private static List<SurveyQuestionPayload.Entry> toEntries(List<SurveyQuestion> questions) {
         List<SurveyQuestionPayload.Entry> out = new ArrayList<>(questions.size());
         for (SurveyQuestion q : questions) {
-            out.add(new SurveyQuestionPayload.Entry(q.id(), q.prompt(), q.scaleMin(), q.scaleMax(), q.allowComment()));
+            out.add(new SurveyQuestionPayload.Entry(q.id(), q.prompt(), q.scaleMin(), q.scaleMax(),
+                    q.allowComment(), q.options()));
         }
         return out;
     }

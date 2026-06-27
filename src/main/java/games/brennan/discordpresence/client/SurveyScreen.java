@@ -62,9 +62,27 @@ public final class SurveyScreen extends Screen {
         int promptLines = this.font.split(Component.literal(q.prompt()), CONTENT_WIDTH).size();
         int promptBottom = promptTop() + promptLines * (this.font.lineHeight + 2);
 
+        boolean isChoice = !q.options().isEmpty();
         this.hasScale = q.scaleMax() >= q.scaleMin();
         int y;
-        if (hasScale) {
+        if (isChoice) {
+            // Multiple-choice: one full-width labelled button per option, stacked vertically
+            // (option labels don't fit a compact numeric row). The chosen 0-based index is the score.
+            List<String> options = q.options();
+            int count = options.size();
+            scoreButtons = new Button[count];
+            int optY = promptBottom + 12;
+            for (int i = 0; i < count; i++) {
+                int value = q.scaleMin() + i; // scaleMin is 0 for choices → value is the chosen index
+                int by = optY + i * (SCORE_H + SCORE_GAP);
+                Button b = Button.builder(Component.literal(options.get(i)), btn -> selectScore(value))
+                        .bounds(left, by, CONTENT_WIDTH, SCORE_H)
+                        .build();
+                scoreButtons[i] = b;
+                addRenderableWidget(b);
+            }
+            y = optY + count * (SCORE_H + SCORE_GAP) + 10;
+        } else if (hasScale) {
             // 0–N score buttons in a single centered row.
             int count = q.scaleMax() - q.scaleMin() + 1;
             scoreButtons = new Button[count];
@@ -94,7 +112,9 @@ public final class SurveyScreen extends Screen {
             commentBox = new EditBox(this.font, left, y, CONTENT_WIDTH, 20, Component.literal("Comment"));
             commentBox.setMaxLength(256);
             commentBox.setHint(Component.literal(
-                    hasScale ? "What's the main reason for your score? (optional)" : "Type your answer here…"));
+                    isChoice ? "Add any details (optional)"
+                            : hasScale ? "What's the main reason for your score? (optional)"
+                            : "Type your answer here…"));
             if (!hasScale) {
                 // No score to gate on — enable Submit only once the player has typed an answer.
                 commentBox.setResponder(text -> submitButton.active = !text.trim().isEmpty());

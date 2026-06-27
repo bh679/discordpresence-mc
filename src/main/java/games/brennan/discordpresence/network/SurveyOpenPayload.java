@@ -31,11 +31,7 @@ public record SurveyOpenPayload(List<SurveyQuestionPayload.Entry> questions) imp
     private void encode(RegistryFriendlyByteBuf buf) {
         buf.writeVarInt(questions.size());
         for (SurveyQuestionPayload.Entry e : questions) {
-            buf.writeUtf(e.id());
-            buf.writeUtf(e.prompt());
-            buf.writeVarInt(e.scaleMin());
-            buf.writeVarInt(e.scaleMax());
-            buf.writeBoolean(e.allowComment());
+            SurveyQuestionPayload.writeEntry(buf, e);
         }
     }
 
@@ -43,12 +39,7 @@ public record SurveyOpenPayload(List<SurveyQuestionPayload.Entry> questions) imp
         int size = buf.readVarInt();
         List<SurveyQuestionPayload.Entry> questions = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
-            String id = buf.readUtf();
-            String prompt = buf.readUtf();
-            int scaleMin = buf.readVarInt();
-            int scaleMax = buf.readVarInt();
-            boolean allowComment = buf.readBoolean();
-            questions.add(new SurveyQuestionPayload.Entry(id, prompt, scaleMin, scaleMax, allowComment));
+            questions.add(SurveyQuestionPayload.readEntry(buf));
         }
         return new SurveyOpenPayload(List.copyOf(questions));
     }

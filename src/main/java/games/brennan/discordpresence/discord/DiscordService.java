@@ -1014,6 +1014,54 @@ public final class DiscordService {
     }
 
     /**
+     * <b>Public API.</b> Post one or more file attachments under the player's name into their Discord
+     * thread (top-level when they have none), with a {@code content} line that should reference the
+     * files. Used by a bundling mod (Dungeon Train) to ship bug-report logs to the feedback feed.
+     * Best-effort: no-ops when disabled / network not allowed / no files, and never throws into game
+     * logic. The MIME type of each file is inferred from its filename extension.
+     *
+     * @param content the message text (e.g. naming the attached files + where they are archived)
+     * @param files   the attachments (filename + bytes), shown in order as {@code files[0..n]}
+     */
+    public void postFeedbackAttachments(ServerPlayer player, String content, List<NamedFile> files) {
+        if (!enabled() || !networkAllowed(player.server) || files == null || files.isEmpty()) {
+            return;
+        }
+        UUID uuid = player.getUUID();
+        String name = player.getGameProfile().getName();
+        String threadId = threadStore.threadId(uuid); // into the player's thread when they have one
+        List<MultipartBody.FilePart> parts = new ArrayList<>(files.size());
+        for (int i = 0; i < files.size(); i++) {
+            NamedFile f = files.get(i);
+            parts.add(new MultipartBody.FilePart("files[" + i + "]", f.filename(), guessMime(f.filename()), f.bytes()));
+        }
+        DiscordWebhookClient.postFiles(name, uuid, threadId, content, parts, List.of())
+                .thenAccept(ref -> {
+                    if (ref != null) {
+                        reverse.put(ref.messageId(), uuid);
+                    }
+                })
+                .exceptionally(t -> {
+                    LOGGER.warn("Feedback attachment post failed: {}", t.toString());
+                    return null;
+                });
+    }
+
+    /** Public attachment payload for {@link #postFeedbackAttachments}: a filename and its bytes. */
+    public record NamedFile(String filename, byte[] bytes) {}
+
+    /** Best-effort MIME type from a filename extension; defaults to {@code application/octet-stream}. */
+    private static String guessMime(String filename) {
+        String lower = filename.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".gz")) return "application/gzip";
+        if (lower.endsWith(".zip")) return "application/zip";
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".json")) return "application/json";
+        if (lower.endsWith(".txt") || lower.endsWith(".log")) return "text/plain";
+        return "application/octet-stream";
+    }
+
+    /**
      * Render the survey-ping message body from user ids — e.g. {@code ["1","2"] → "<@1> <@2>"}. Blank
      * ids are skipped; a null/empty list (or all-blank) yields {@code null} so no {@code content} is sent.
      * The matching {@code allowed_mentions.users} allow-list is what makes these mentions actually notify.
