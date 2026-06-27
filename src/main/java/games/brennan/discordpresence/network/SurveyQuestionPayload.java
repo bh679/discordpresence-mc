@@ -19,8 +19,21 @@ import java.util.List;
  */
 public record SurveyQuestionPayload(List<Entry> questions) implements CustomPacketPayload {
 
-    /** One question's client-facing fields. */
-    public record Entry(String id, String prompt, int scaleMin, int scaleMax, boolean allowComment) {}
+    /**
+     * One question's client-facing fields. {@code options} is non-empty for a multiple-choice
+     * question (the submitted score is the chosen 0-based index into it); empty otherwise.
+     */
+    public record Entry(String id, String prompt, int scaleMin, int scaleMax, boolean allowComment,
+                        List<String> options) {
+        public Entry {
+            options = options == null ? List.of() : List.copyOf(options);
+        }
+
+        /** Back-compat constructor for a plain scale/text question (no choice options). */
+        public Entry(String id, String prompt, int scaleMin, int scaleMax, boolean allowComment) {
+            this(id, prompt, scaleMin, scaleMax, allowComment, List.of());
+        }
+    }
 
     /** The "no questions — hide the button" sentinel. */
     public static final SurveyQuestionPayload NONE = new SurveyQuestionPayload(List.of());
@@ -36,11 +49,7 @@ public record SurveyQuestionPayload(List<Entry> questions) implements CustomPack
     private void encode(RegistryFriendlyByteBuf buf) {
         buf.writeVarInt(questions.size());
         for (Entry e : questions) {
-            buf.writeUtf(e.id());
-            buf.writeUtf(e.prompt());
-            buf.writeVarInt(e.scaleMin());
-            buf.writeVarInt(e.scaleMax());
-            buf.writeBoolean(e.allowComment());
+            writeEntry(buf, e);
         }
     }
 
@@ -48,14 +57,36 @@ public record SurveyQuestionPayload(List<Entry> questions) implements CustomPack
         int size = buf.readVarInt();
         List<Entry> questions = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
-            String id = buf.readUtf();
-            String prompt = buf.readUtf();
-            int scaleMin = buf.readVarInt();
-            int scaleMax = buf.readVarInt();
-            boolean allowComment = buf.readBoolean();
-            questions.add(new Entry(id, prompt, scaleMin, scaleMax, allowComment));
+            questions.add(readEntry(buf));
         }
         return new SurveyQuestionPayload(List.copyOf(questions));
+    }
+
+    /** Shared entry wire format (also reused by {@link SurveyOpenPayload}). */
+    static void writeEntry(RegistryFriendlyByteBuf buf, Entry e) {
+        buf.writeUtf(e.id());
+        buf.writeUtf(e.prompt());
+        buf.writeVarInt(e.scaleMin());
+        buf.writeVarInt(e.scaleMax());
+        buf.writeBoolean(e.allowComment());
+        buf.writeVarInt(e.options().size());
+        for (String option : e.options()) {
+            buf.writeUtf(option);
+        }
+    }
+
+    static Entry readEntry(RegistryFriendlyByteBuf buf) {
+        String id = buf.readUtf();
+        String prompt = buf.readUtf();
+        int scaleMin = buf.readVarInt();
+        int scaleMax = buf.readVarInt();
+        boolean allowComment = buf.readBoolean();
+        int optionCount = buf.readVarInt();
+        List<String> options = new ArrayList<>(optionCount);
+        for (int i = 0; i < optionCount; i++) {
+            options.add(buf.readUtf());
+        }
+        return new Entry(id, prompt, scaleMin, scaleMax, allowComment, options);
     }
 
     @Override

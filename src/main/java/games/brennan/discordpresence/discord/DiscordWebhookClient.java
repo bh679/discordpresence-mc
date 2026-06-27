@@ -180,6 +180,67 @@ final class DiscordWebhookClient {
     }
 
     /**
+     * Post a plain message under the player's name/avatar with one or more file attachments
+     * (no embed). Discord shows each attachment inline/downloadable; the {@code content} line
+     * can name them. Routes through the configured webhook (the feedback feed / relay {@code /hook}).
+     * Used for bug-report logs. Multipart, so it uses the longer {@link DiscordHttp#REPORT_TIMEOUT}.
+     *
+     * @return a future of the posted message ref, {@code null} when disabled, no files, or on failure.
+     */
+    static CompletableFuture<DiscordMessageRef> postFiles(String playerName, UUID uuid, String threadId,
+                                                          String content, List<MultipartBody.FilePart> files,
+                                                          List<String> allowedUserIds) {
+        String webhookUrl = DiscordPresenceConfig.getWebhookUrl();
+        if (webhookUrl.isBlank() || files == null || files.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        JsonObject root = buildContentRoot(playerName, uuid, content, allowedUserIds);
+        String url = withQuery(webhookUrl, threadId);
+        String boundary = "DPBoundary" + UUID.randomUUID().toString().replace("-", "");
+        MultipartBody mb = MultipartBody.jsonWithFiles(boundary, root.toString(), files);
+        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                .header("Content-Type", mb.contentType())
+                .header("User-Agent", "DiscordPresence-Mod")
+                .timeout(DiscordHttp.REPORT_TIMEOUT)  // file upload — needs more than the 10s JSON timeout
+                .POST(HttpRequest.BodyPublishers.ofByteArray(mb.body()))
+                .build();
+        return DiscordHttp.sendWithRetry(req)
+                .thenApply(DiscordWebhookClient::parseMessageRef)
+                .exceptionally(t -> {
+                    LOGGER.warn("Discord webhook files POST failed: {}", t.toString());
+                    return null;
+                });
+    }
+
+    /**
+     * Build a webhook JSON root for a content-only message (no embed): the player username/avatar,
+     * an optional {@code content} body, and the {@code allowed_mentions} block (parsing suppressed;
+     * only the trusted {@code allowedUserIds} may ping). Pure (no I/O) so it is unit-testable.
+     */
+    static JsonObject buildContentRoot(String playerName, UUID uuid, String content, List<String> allowedUserIds) {
+        JsonObject root = new JsonObject();
+        String username = safeUsername(playerName);
+        if (username != null) {
+            root.addProperty("username", username);
+        }
+        root.addProperty("avatar_url", "https://mc-heads.net/avatar/" + uuid + "/64");
+        if (content != null && !content.isBlank()) {
+            root.addProperty("content", content);
+        }
+        JsonObject allowedMentions = new JsonObject();
+        allowedMentions.add("parse", new JsonArray());
+        if (allowedUserIds != null && !allowedUserIds.isEmpty()) {
+            JsonArray users = new JsonArray();
+            for (String id : allowedUserIds) {
+                users.add(id);
+            }
+            allowedMentions.add("users", users);
+        }
+        root.add("allowed_mentions", allowedMentions);
+        return root;
+    }
+
+    /**
      * Build the report webhook JSON root: the player username/avatar, the single embed, an optional
      * {@code content} body, and the {@code allowed_mentions} block. Mention <i>parsing</i> is always
      * suppressed (a player-controlled name/embed can never ping); only the trusted caller-supplied

@@ -73,13 +73,21 @@ public final class SurveyQuestionLoader extends SimpleJsonResourceReloadListener
      */
     static SurveyQuestion parse(String id, JsonObject obj) {
         String prompt = GsonHelper.getAsString(obj, "prompt");
+        boolean allowComment = GsonHelper.getAsBoolean(obj, "allow_comment", true);
+        // "options": [...] → a multiple-choice question (the chosen index is the answer).
+        if (obj.has("options")) {
+            List<String> options = new ArrayList<>();
+            for (JsonElement el : GsonHelper.getAsJsonArray(obj, "options")) {
+                options.add(GsonHelper.convertToString(el, "option"));
+            }
+            return SurveyQuestion.choice(id, prompt, options, allowComment);
+        }
         // "scale": false → a comment-only text question (the comment box is the sole answer).
         if (!GsonHelper.getAsBoolean(obj, "scale", true)) {
             return SurveyQuestion.text(id, prompt);
         }
         int scaleMin = GsonHelper.getAsInt(obj, "scale_min", 0);
         int scaleMax = GsonHelper.getAsInt(obj, "scale_max", 10);
-        boolean allowComment = GsonHelper.getAsBoolean(obj, "allow_comment", true);
         return new SurveyQuestion(id, prompt, scaleMin, scaleMax, allowComment);
     }
 }
