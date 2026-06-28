@@ -980,29 +980,51 @@ public final class DiscordService {
     }
 
     /**
-     * Post a player's survey/feedback response as an embed into the player's Discord
-     * thread (the same thread as their join / death / advancement messages) when they
-     * have one, else top-level — under the player's name/avatar, no composed image.
-     * Best-effort; the HTTP runs off-thread via the webhook client.
+     * Post a survey-style embed into the player's Discord thread (the same thread as their join /
+     * death / advancement messages) when they have one, else top-level — under the player's
+     * name/avatar, no composed image. Best-effort; the HTTP runs off-thread via the webhook client.
      *
-     * <p><b>Public API.</b> Driven by {@code SurveyManager} when a player submits a
-     * death-screen survey answer ({@code fields} = the rating, plus an optional
-     * comment field).</p>
+     * <p><b>Public API — embed-style notice, NO survey-results copy.</b> Reused by a bundling mod for
+     * its own one-off notices that borrow the survey look (e.g. Dungeon Train's "entered Free Play" and
+     * difficulty-level lines). The genuine survey-answer path is {@link #postSurveyAnswer} — only that
+     * produces a copy in the survey-results channel.</p>
      */
     public void postSurveyResponse(ServerPlayer player, String title, String description, List<DeathField> fields) {
-        postSurveyResponse(player, title, description, fields, List.of());
+        postSurveyResponse(player, title, description, fields, List.of(), false);
     }
 
     /**
      * As {@link #postSurveyResponse(ServerPlayer, String, String, List)} but additionally @-mentions
      * {@code pingUserIds} (their ids become the message {@code content} + a trusted
-     * {@code allowed_mentions.users} allow-list, so they are actually notified). <b>Only the genuine
-     * survey-answer path passes a non-empty list</b> — other callers that reuse this embed style (e.g.
-     * Dungeon Train's "entered Free Play" notice) use the 4-arg form above and never ping. An empty/null
-     * list reproduces the no-ping report exactly.
+     * {@code allowed_mentions.users} allow-list, so they are actually notified). Still NO survey-results
+     * copy (see {@link #postSurveyAnswer}). An empty/null list reproduces the no-ping report exactly.
      */
     public void postSurveyResponse(ServerPlayer player, String title, String description,
                                    List<DeathField> fields, List<String> pingUserIds) {
+        postSurveyResponse(player, title, description, fields, pingUserIds, false);
+    }
+
+    /**
+     * Post a genuine feedback-survey answer: the threaded embed (with the maintainer ping) AND — when
+     * {@code surveyResultsCopyEnabled} — a copy into the flat survey-results channel with a jump-link
+     * back to the threaded original.
+     *
+     * <p><b>Public API.</b> Driven by {@code SurveyManager} when a player submits a death-screen survey
+     * answer. This is the ONLY path that produces a survey-results copy — embed-style notices that reuse
+     * {@link #postSurveyResponse} (Free Play, difficulty) never appear in the survey-results channel.</p>
+     */
+    public void postSurveyAnswer(ServerPlayer player, String title, String description,
+                                 List<DeathField> fields, List<String> pingUserIds) {
+        postSurveyResponse(player, title, description, fields, pingUserIds, true);
+    }
+
+    /**
+     * Shared implementation for the survey embed post. {@code copyToResultsChannel} gates the
+     * survey-results copy so only the genuine answer path ({@link #postSurveyAnswer}) produces one.
+     */
+    private void postSurveyResponse(ServerPlayer player, String title, String description,
+                                    List<DeathField> fields, List<String> pingUserIds,
+                                    boolean copyToResultsChannel) {
         if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
@@ -1015,9 +1037,11 @@ public final class DiscordService {
                 .thenAccept(ref -> {
                     if (ref != null) {
                         reverse.put(ref.messageId(), uuid);
-                        // Also drop a copy into the flat survey-results channel, linking back to this
-                        // threaded original. Fires its own async post; its failure can't affect the above.
-                        postSurveyResultsCopy(name, uuid, title, description, fields, ref);
+                        if (copyToResultsChannel) {
+                            // Also drop a copy into the flat survey-results channel, linking back to this
+                            // threaded original. Fires its own async post; its failure can't affect the above.
+                            postSurveyResultsCopy(name, uuid, title, description, fields, ref);
+                        }
                     }
                 })
                 .exceptionally(t -> {
