@@ -2,6 +2,7 @@ package games.brennan.discordpresence.discord;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import games.brennan.discordpresence.compat.DiscordCommandHooks;
 import games.brennan.discordpresence.compat.InboundDiscordHooks;
 import com.mojang.logging.LogUtils;
 import games.brennan.discordpresence.config.DiscordCredentials;
@@ -482,6 +483,15 @@ public final class DiscordService {
         // bundler can react to a Discord user — e.g. the dev — even on an unanchored message.
         if (msg != null && !msg.isOwnOrBot()) {
             InboundDiscordHooks.fire(msg.authorId(), msg.authorName(), msg.content());
+            // Operator-command seam: a bundler may treat this message as a command and reply in the
+            // same channel. A handled command is NOT relayed into game chat (the "!cmd" text would be
+            // noise). The reply posts via the bot to the originating channel.
+            final String channelId = msg.channelId();
+            boolean handled = DiscordCommandHooks.fire(msg.authorId(), msg.authorName(), msg.content(),
+                    replyContent -> DiscordThreadClient.postPlain(channelId, replyContent));
+            if (handled) {
+                return;
+            }
         }
         if (!isRelayable(msg, reverse)) {
             return; // our own posts/bots, or not anchored to a tracked player message
