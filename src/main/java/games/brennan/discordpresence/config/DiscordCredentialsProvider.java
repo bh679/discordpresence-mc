@@ -169,4 +169,35 @@ public interface DiscordCredentialsProvider {
     default List<String> surveyPingUserIds() {
         return List.of();
     }
+
+    /**
+     * Whether DP should also post a COPY of each survey answer into a flat survey-results channel
+     * (in addition to the per-player thread), so all feedback is browsable in one place. Default
+     * false (standalone DP posts only the threaded answer, as before). A bundling mod opts in here.
+     * The copy's destination is {@link #surveyResultsWebhookUrl()}; when that is blank the copy
+     * falls back to the default webhook (so a dev build's copy still appears in its dev channel).
+     */
+    default boolean surveyResultsCopyEnabled() {
+        return false;
+    }
+
+    /**
+     * Destination the survey-results copy posts to — its own webhook URL or relay {@code <base>/hook}
+     * for a dedicated channel. Blank/{@code null} = the default webhook (same feed as the thread,
+     * posted top-level). Only consulted when {@link #surveyResultsCopyEnabled()} is true. Default
+     * blank. A dev-env webhook override still wins for local testing.
+     */
+    default String surveyResultsWebhookUrl() {
+        return "";
+    }
+
+    /**
+     * Discord guild (server) id used to build the copy's jump-link back to the threaded original
+     * ({@code https://discord.com/channels/{guild}/{thread}/{message}}). Required for a clickable
+     * link because DP cannot learn the guild id at runtime in relay / webhook-only mode. Not a
+     * secret. Blank/{@code null} = the copy posts without a link. Default blank.
+     */
+    default String surveyResultsLinkGuildId() {
+        return "";
+    }
 }

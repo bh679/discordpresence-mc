@@ -1015,10 +1015,44 @@ public final class DiscordService {
                 .thenAccept(ref -> {
                     if (ref != null) {
                         reverse.put(ref.messageId(), uuid);
+                        // Also drop a copy into the flat survey-results channel, linking back to this
+                        // threaded original. Fires its own async post; its failure can't affect the above.
+                        postSurveyResultsCopy(name, uuid, title, description, fields, ref);
                     }
                 })
                 .exceptionally(t -> {
                     LOGGER.warn("Survey response post failed: {}", t.toString());
+                    return null;
+                });
+    }
+
+    /**
+     * Best-effort copy of a survey answer into a single flat survey-results channel, in addition to
+     * the per-player thread — so all feedback is browsable in one place. No-op unless
+     * {@code surveyResultsCopyEnabled}. Posts the <i>same</i> embed (rebuilt fresh, never the threaded
+     * instance) top-level to {@code surveyResultsWebhookUrl} (blank → the default webhook), with a
+     * jump-link back to {@code original} in the content. Never pings (the threaded answer already did).
+     * Runs off the server thread inside the threaded post's completion callback; its own failure is
+     * swallowed so it can never break the primary path.
+     */
+    private void postSurveyResultsCopy(String name, UUID uuid, String title, String description,
+                                       List<DeathField> fields, DiscordMessageRef original) {
+        if (!DiscordPresenceConfig.isSurveyResultsCopyEnabled()) {
+            return;
+        }
+        JsonObject embed = buildReportEmbed(title, description, fields, DiscordPresenceConfig.getSurveyEmbedColor());
+        String link = SurveyJumpLink.url(DiscordPresenceConfig.getSurveyResultsLinkGuildId(),
+                original.channelId(), original.messageId());
+        String content = SurveyJumpLink.content(link);
+        String dest = DiscordPresenceConfig.getSurveyResultsWebhookUrl(); // blank → default webhook (postReport handles it)
+        DiscordWebhookClient.postReport(name, uuid, null, embed, null, null, dest, content, List.of())
+                .thenAccept(ref -> {
+                    if (ref != null) {
+                        reverse.put(ref.messageId(), uuid);
+                    }
+                })
+                .exceptionally(t -> {
+                    LOGGER.warn("Survey results copy post failed: {}", t.toString());
                     return null;
                 });
     }
