@@ -195,6 +195,29 @@ public final class DiscordCredentials {
         }
     }
 
+    /** Whether the provider asks DP to also post a survey-results copy; false when none / it throws. */
+    public static boolean providerSurveyResultsCopyEnabled() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return false;
+        }
+        try {
+            return current.surveyResultsCopyEnabled();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** The provider's survey-results copy destination webhook, or {@code ""} when none / it fails. */
+    public static String providerSurveyResultsWebhookUrl() {
+        return read(DiscordCredentialsProvider::surveyResultsWebhookUrl);
+    }
+
+    /** The provider's guild id for survey-copy jump-links, or {@code ""} when none / it fails. */
+    public static String providerSurveyResultsLinkGuildId() {
+        return read(DiscordCredentialsProvider::surveyResultsLinkGuildId);
+    }
+
     /**
      * The provider's extra advancement message-suffix line for this player / advancement, or {@code ""}
      * when none is registered / it fails. Reuses {@link #read}'s null- and throwable-safe contract.

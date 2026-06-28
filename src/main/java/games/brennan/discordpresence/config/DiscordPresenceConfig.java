@@ -66,6 +66,7 @@ public final class DiscordPresenceConfig {
 
     public static final boolean DEFAULT_SURVEY_ENABLED = true;
     public static final int DEFAULT_SURVEY_EMBED_COLOR = 0x5865F2; // blue — distinct from death/disconnect
+    public static final boolean DEFAULT_SURVEY_RESULTS_COPY_ENABLED = false;
 
     public static final boolean DEFAULT_REINCARNATION_BRIDGE = true;
 
@@ -162,6 +163,9 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.IntValue DISCONNECT_REPORT_EMBED_COLOR;
     public static final ModConfigSpec.BooleanValue SURVEY_ENABLED;
     public static final ModConfigSpec.IntValue SURVEY_EMBED_COLOR;
+    public static final ModConfigSpec.BooleanValue SURVEY_RESULTS_COPY_ENABLED;
+    public static final ModConfigSpec.ConfigValue<String> SURVEY_RESULTS_WEBHOOK_URL;
+    public static final ModConfigSpec.ConfigValue<String> SURVEY_RESULTS_LINK_GUILD_ID;
     public static final ModConfigSpec.BooleanValue REINCARNATION_BRIDGE;
 
     static {
@@ -361,6 +365,24 @@ public final class DiscordPresenceConfig {
                 .comment("Embed colour for a posted survey response, as a decimal 0xRRGGBB value (default 0x5865F2,",
                          "a blue — visually distinct from the death and disconnect reports).")
                 .defineInRange("surveyEmbedColor", DEFAULT_SURVEY_EMBED_COLOR, 0x000000, 0xFFFFFF);
+        SURVEY_RESULTS_COPY_ENABLED = b
+                .comment("Also post a COPY of each survey answer into a flat 'survey results' channel, on top",
+                         "of the per-player thread — so all feedback is browsable in one place. The copy is the",
+                         "same embed plus a jump-link back to the threaded original. Off by default (standalone",
+                         "DP posts only the threaded answer). Set surveyResultsWebhookUrl to a dedicated channel;",
+                         "left blank, the copy posts top-level in the default feed (a near-duplicate).")
+                .define("surveyResultsCopyEnabled", DEFAULT_SURVEY_RESULTS_COPY_ENABLED);
+        SURVEY_RESULTS_WEBHOOK_URL = b
+                .comment("Destination webhook (or relay <base>/hook) for the survey-results copy — a dedicated",
+                         "channel separate from the community feed. Blank = the default webhook (same feed,",
+                         "top-level). Only used when surveyResultsCopyEnabled is true. SECRET — do not share or commit.")
+                .define("surveyResultsWebhookUrl", "");
+        SURVEY_RESULTS_LINK_GUILD_ID = b
+                .comment("Discord guild (server) id used to build the copy's clickable jump-link back to the",
+                         "threaded original. Required for the link because DP cannot learn the guild id at runtime",
+                         "in relay/webhook-only mode (Developer Mode → right-click the server → Copy Server ID).",
+                         "Not a secret. Blank = the copy posts without a link.")
+                .define("surveyResultsLinkGuildId", "");
         REINCARNATION_BRIDGE = b
                 .comment("Bridge PlayerMob's cross-world reincarnation pool to the relay (requires the PlayerMob mod",
                          "AND relayBaseUrl set — there is no cross-world pool in direct-to-Discord mode). When on, a",
@@ -781,6 +803,30 @@ public final class DiscordPresenceConfig {
 
     public static int getSurveyEmbedColor() {
         return isLoaded() ? SURVEY_EMBED_COLOR.get() : DEFAULT_SURVEY_EMBED_COLOR;
+    }
+
+    /**
+     * Whether to also post a survey-results copy: the local config flag OR the bundling mod's
+     * provider opt-in ({@link DiscordCredentials#providerSurveyResultsCopyEnabled()}). Either turning
+     * it on is enough; standalone DP (no provider) honours its config flag alone (default off).
+     */
+    public static boolean isSurveyResultsCopyEnabled() {
+        boolean configValue = isLoaded() ? SURVEY_RESULTS_COPY_ENABLED.get() : DEFAULT_SURVEY_RESULTS_COPY_ENABLED;
+        return configValue || DiscordCredentials.providerSurveyResultsCopyEnabled();
+    }
+
+    /** Resolved survey-results copy destination ({@code ""} = the default webhook). Provider wins over config. */
+    public static String getSurveyResultsWebhookUrl() {
+        String configValue = isLoaded() ? SURVEY_RESULTS_WEBHOOK_URL.get() : "";
+        return CredentialResolver.resolve(configValue,
+                DiscordCredentials.providerSurveyResultsWebhookUrl(), CREDENTIAL_POLICY);
+    }
+
+    /** Resolved guild id for survey-copy jump-links ({@code ""} = no link). Provider wins over config. */
+    public static String getSurveyResultsLinkGuildId() {
+        String configValue = isLoaded() ? SURVEY_RESULTS_LINK_GUILD_ID.get() : "";
+        return CredentialResolver.resolve(configValue,
+                DiscordCredentials.providerSurveyResultsLinkGuildId(), CREDENTIAL_POLICY);
     }
 
     /**

@@ -103,9 +103,10 @@ public final class SurveyManager {
             String label = question.isChoice() ? "Details" : (question.hasScale() ? "Comment" : "Answer");
             fields.add(new DeathField(label, cleaned));
         }
-        // Ping the seam's user ids ONLY here — the genuine survey-answer path. Other reusers of
-        // postSurveyResponse (e.g. DT's Free Play notice) call the no-ping 4-arg form and never mention.
-        DiscordService.get().postSurveyResponse(player, "📋 Feedback — " + name, question.prompt(), fields,
+        // The genuine survey-answer path: ping the seam's user ids AND post the survey-results copy.
+        // Other reusers of the survey embed style (e.g. DT's Free Play / difficulty notices) call
+        // postSurveyResponse instead — they never ping and never produce a results-channel copy.
+        DiscordService.get().postSurveyAnswer(player, "📋 Feedback — " + name, question.prompt(), fields,
                 DiscordCredentials.providerSurveyPingUserIds());
 
         // If the player has now answered every question, the survey is complete — notify the

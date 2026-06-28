@@ -168,6 +168,37 @@ class DiscordPresenceConfigSeamTest {
         assertFalse(DiscordPresenceConfig.isPresenceTrackingEnabled());
     }
 
+    @Test
+    void surveyResultsCopy_defaultsOff_andProviderEnablesIt() {
+        // No provider + config unloaded → copy off, no destination, no guild id.
+        DiscordCredentials.register(null);
+        assertFalse(DiscordPresenceConfig.isSurveyResultsCopyEnabled());
+        assertEquals("", DiscordPresenceConfig.getSurveyResultsWebhookUrl());
+        assertEquals("", DiscordPresenceConfig.getSurveyResultsLinkGuildId());
+        // A bundling mod opts in and supplies the destination + guild id (this is how DT wires it).
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public boolean surveyResultsCopyEnabled() { return true; }
+            @Override public String surveyResultsWebhookUrl() { return "https://relay/survey/hook"; }
+            @Override public String surveyResultsLinkGuildId() { return "1234567890"; }
+        });
+        assertTrue(DiscordPresenceConfig.isSurveyResultsCopyEnabled());
+        assertEquals("https://relay/survey/hook", DiscordPresenceConfig.getSurveyResultsWebhookUrl());
+        assertEquals("1234567890", DiscordPresenceConfig.getSurveyResultsLinkGuildId());
+    }
+
+    @Test
+    void surveyResultsCopy_enabledWithBlankDestination_isAllowed() {
+        // Enabling the copy without a destination is valid: the copy falls back to the default webhook
+        // (a dev build's copy still appears in its dev channel — see DiscordService.postSurveyResultsCopy).
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public boolean surveyResultsCopyEnabled() { return true; }
+        });
+        assertTrue(DiscordPresenceConfig.isSurveyResultsCopyEnabled());
+        assertEquals("", DiscordPresenceConfig.getSurveyResultsWebhookUrl());
+    }
+
     // --- Dev webhook env-var override (DISCORDPRESENCE_DEV_WEBHOOK_URL) ----------------------------
     // The env read itself isn't portably settable in a unit test, so the precedence + relay-forcing
     // logic is extracted into pure helpers and exercised here directly. The blank-relay → Discord-direct

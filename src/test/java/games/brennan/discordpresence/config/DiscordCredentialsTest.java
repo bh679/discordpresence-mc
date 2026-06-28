@@ -139,6 +139,78 @@ class DiscordCredentialsTest {
     }
 
     @Test
+    void surveyResultsCopyEnabled_defaultsFalse_providerCanEnable_throwSafe() {
+        DiscordCredentials.register(null);
+        assertFalse(DiscordCredentials.providerSurveyResultsCopyEnabled());
+
+        DiscordCredentials.register(() -> ""); // default surveyResultsCopyEnabled() == false
+        assertFalse(DiscordCredentials.providerSurveyResultsCopyEnabled());
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public boolean surveyResultsCopyEnabled() { return true; }
+        });
+        assertTrue(DiscordCredentials.providerSurveyResultsCopyEnabled());
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public boolean surveyResultsCopyEnabled() { throw new RuntimeException("boom"); }
+        });
+        assertFalse(DiscordCredentials.providerSurveyResultsCopyEnabled()); // throw → false
+    }
+
+    @Test
+    void surveyResultsWebhookUrl_defaultBlank_nullAndThrowSafe() {
+        DiscordCredentials.register(null);
+        assertEquals("", DiscordCredentials.providerSurveyResultsWebhookUrl());
+
+        DiscordCredentials.register(() -> ""); // default surveyResultsWebhookUrl() == ""
+        assertEquals("", DiscordCredentials.providerSurveyResultsWebhookUrl());
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String surveyResultsWebhookUrl() { return null; }
+        });
+        assertEquals("", DiscordCredentials.providerSurveyResultsWebhookUrl()); // null → ""
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String surveyResultsWebhookUrl() { throw new RuntimeException("boom"); }
+        });
+        assertEquals("", DiscordCredentials.providerSurveyResultsWebhookUrl()); // throw → ""
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String surveyResultsWebhookUrl() { return "https://relay/survey/hook"; }
+        });
+        assertEquals("https://relay/survey/hook", DiscordCredentials.providerSurveyResultsWebhookUrl());
+    }
+
+    @Test
+    void surveyResultsLinkGuildId_defaultBlank_nullAndThrowSafe() {
+        DiscordCredentials.register(null);
+        assertEquals("", DiscordCredentials.providerSurveyResultsLinkGuildId());
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String surveyResultsLinkGuildId() { return null; }
+        });
+        assertEquals("", DiscordCredentials.providerSurveyResultsLinkGuildId()); // null → ""
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String surveyResultsLinkGuildId() { throw new RuntimeException("boom"); }
+        });
+        assertEquals("", DiscordCredentials.providerSurveyResultsLinkGuildId()); // throw → ""
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String surveyResultsLinkGuildId() { return "1234567890"; }
+        });
+        assertEquals("1234567890", DiscordCredentials.providerSurveyResultsLinkGuildId());
+    }
+
+    @Test
     void advancementSuffix_defaultBlank_nullAndThrowSafe() {
         UUID player = UUID.randomUUID();
 
