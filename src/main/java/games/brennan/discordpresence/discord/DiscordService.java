@@ -479,15 +479,21 @@ public final class DiscordService {
                     msg.authorName(), msg.referencedMessageId(), msg.channelId(), msg.bot(), msg.hasWebhookId(),
                     reverse.contains(msg.referencedMessageId()) || reverse.contains(msg.channelId()));
         }
+        // The player whose thread this message is in (null when unanchored — a top-level channel
+        // post). Shared by the command seam (so a bundler can scope delivery to that one player)
+        // and the relay below; resolving it once keeps the two in lock-step.
+        final UUID owner = resolveOwner(msg, reverse);
         // Notify host-mod observers of every human message (before the relay-anchor gate), so a
         // bundler can react to a Discord user — e.g. the dev — even on an unanchored message.
         if (msg != null && !msg.isOwnOrBot()) {
             InboundDiscordHooks.fire(msg.authorId(), msg.authorName(), msg.content());
             // Operator-command seam: a bundler may treat this message as a command and reply in the
             // same channel. A handled command is NOT relayed into game chat (the "!cmd" text would be
-            // noise). The reply posts via the bot to the originating channel.
+            // noise). The reply posts via the bot to the originating channel. The owner uuid lets a
+            // handler deliver to just that player rather than every online player.
             final String channelId = msg.channelId();
             boolean handled = DiscordCommandHooks.fire(msg.authorId(), msg.authorName(), msg.content(),
+                    owner == null ? null : owner.toString(),
                     replyContent -> DiscordThreadClient.postPlain(channelId, replyContent));
             if (handled) {
                 return;
@@ -497,10 +503,6 @@ public final class DiscordService {
             return; // our own posts/bots, or not anchored to a tracked player message
         }
         // A Discord reply reached the server — disarm that player's auto-responses.
-        UUID owner = reverse.get(msg.referencedMessageId());
-        if (owner == null) {
-            owner = reverse.get(msg.channelId());
-        }
         if (owner != null) {
             autoResponder.onDiscordActivity(owner);
         }
@@ -520,8 +522,21 @@ public final class DiscordService {
         if (srv == null) {
             return;
         }
-        // Hop to the server thread; broadcast as a SYSTEM message (does not re-fire ServerChatEvent).
-        srv.execute(() -> srv.getPlayerList().broadcastSystemMessage(Component.literal(line), false));
+        // Hop to the server thread and deliver ONLY to the player whose thread this message is in —
+        // never a global broadcast. owner is non-null here (isRelayable required an anchor); the
+        // guard is defensive. A SYSTEM message does not re-fire ServerChatEvent. When that player is
+        // offline the message is dropped in-game (their main-menu chat inbox on the relay still has it).
+        final UUID target = owner;
+        final Component text = Component.literal(line);
+        srv.execute(() -> {
+            if (target == null) {
+                return;
+            }
+            ServerPlayer recipient = srv.getPlayerList().getPlayer(target);
+            if (recipient != null) {
+                recipient.sendSystemMessage(text);
+            }
+        });
     }
 
     // --- presence tracking + query seam ---
@@ -597,6 +612,21 @@ public final class DiscordService {
             return false;
         }
         return index.contains(msg.referencedMessageId()) || index.contains(msg.channelId());
+    }
+
+    /**
+     * The Minecraft player whose thread {@code msg} belongs to: the player the message replies to,
+     * or — for a message posted directly in a thread — the player whose thread it is ({@code
+     * channelId} equals that player's anchor message id). {@code null} when the message isn't
+     * anchored to any player's thread (a top-level channel post). Extracted so it is unit-testable;
+     * whenever {@link #isRelayable} is true this is non-null.
+     */
+    static UUID resolveOwner(InboundMessage msg, PlayerMessageIndex index) {
+        if (msg == null) {
+            return null;
+        }
+        UUID owner = index.get(msg.referencedMessageId());
+        return owner != null ? owner : index.get(msg.channelId());
     }
 
     /**

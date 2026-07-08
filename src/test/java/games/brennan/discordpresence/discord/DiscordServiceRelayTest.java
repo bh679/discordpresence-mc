@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Pure inbound relay-decision + sanitisation logic (no Minecraft runtime needed). */
@@ -48,6 +49,45 @@ class DiscordServiceRelayTest {
     @Test
     void ignoresNull() {
         assertFalse(DiscordService.isRelayable(null, new PlayerMessageIndex(10)));
+    }
+
+    // --- resolveOwner: which single player a relayable message is delivered to ---
+
+    @Test
+    void resolveOwnerFromReplyReference() {
+        PlayerMessageIndex idx = new PlayerMessageIndex(10);
+        UUID alice = UUID.randomUUID();
+        idx.put("join1", alice);
+        // a reply to alice's tracked message → alice, regardless of which channel it arrived on
+        assertEquals(alice, DiscordService.resolveOwner(msg("chanX", "join1", false, false), idx));
+    }
+
+    @Test
+    void resolveOwnerFromThreadChannel() {
+        PlayerMessageIndex idx = new PlayerMessageIndex(10);
+        UUID bob = UUID.randomUUID();
+        idx.put("line5", bob);
+        // a message in bob's thread (channelId == the tracked message id, no reply reference) → bob
+        assertEquals(bob, DiscordService.resolveOwner(msg("line5", null, false, false), idx));
+    }
+
+    @Test
+    void resolveOwnerPrefersReplyReferenceOverChannel() {
+        PlayerMessageIndex idx = new PlayerMessageIndex(10);
+        UUID alice = UUID.randomUUID();
+        UUID bob = UUID.randomUUID();
+        idx.put("aliceMsg", alice); // the message being replied to
+        idx.put("bobThread", bob);  // the thread it happens to be posted in
+        assertEquals(alice, DiscordService.resolveOwner(msg("bobThread", "aliceMsg", false, false), idx));
+    }
+
+    @Test
+    void resolveOwnerNullWhenUnanchored() {
+        PlayerMessageIndex idx = new PlayerMessageIndex(10);
+        idx.put("join1", UUID.randomUUID());
+        // neither the channel nor the reference is a tracked player message → nobody owns it
+        assertNull(DiscordService.resolveOwner(msg("randomChan", "otherMsg", false, false), idx));
+        assertNull(DiscordService.resolveOwner(null, idx));
     }
 
     @Test

@@ -29,13 +29,17 @@ public final class DiscordCommandHooks {
     /** Handles a candidate command message. */
     public interface Handler {
         /**
-         * @param authorId   the Discord user id (may be empty if the transport didn't carry it)
-         * @param authorName the author's display name
-         * @param content    the raw message content
-         * @param reply      posts a plain reply to the same channel
+         * @param authorId         the Discord user id (may be empty if the transport didn't carry it)
+         * @param authorName       the author's display name
+         * @param content          the raw message content
+         * @param targetPlayerUuid the Minecraft UUID (as a string) of the player whose thread this
+         *                         message belongs to, or {@code null} when the message isn't anchored
+         *                         to a player's thread (e.g. a top-level channel post). Lets a handler
+         *                         scope delivery to the one player instead of every online player.
+         * @param reply            posts a plain reply to the same channel
          * @return {@code true} if this message was a command and was handled (suppress the normal relay)
          */
-        boolean onCommand(String authorId, String authorName, String content, Reply reply);
+        boolean onCommand(String authorId, String authorName, String content, String targetPlayerUuid, Reply reply);
     }
 
     private static final List<Handler> HANDLERS = new CopyOnWriteArrayList<>();
@@ -52,13 +56,16 @@ public final class DiscordCommandHooks {
     /**
      * Fire all handlers; called by DiscordPresence's inbound message handler.
      *
+     * @param targetPlayerUuid the Minecraft UUID (as a string) of the player whose thread the message
+     *                         is in, or {@code null} when it isn't anchored to a player's thread.
      * @return {@code true} if any handler consumed the message (it was a command).
      */
-    public static boolean fire(String authorId, String authorName, String content, Reply reply) {
+    public static boolean fire(String authorId, String authorName, String content,
+                               String targetPlayerUuid, Reply reply) {
         boolean handled = false;
         for (Handler handler : HANDLERS) {
             try {
-                handled |= handler.onCommand(authorId, authorName, content, reply);
+                handled |= handler.onCommand(authorId, authorName, content, targetPlayerUuid, reply);
             } catch (Throwable ignored) {
                 // A misbehaving host handler must never break the chat bridge.
             }
