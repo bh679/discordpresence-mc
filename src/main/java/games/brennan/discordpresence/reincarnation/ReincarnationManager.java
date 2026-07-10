@@ -125,7 +125,8 @@ public final class ReincarnationManager {
                 + ", playermob=" + ModList.get().isLoaded(PLAYERMOB_MOD_ID)
                 + ", seam=" + (s != null && s.available())
                 + ", cachedBands=" + cache.cachedOwnerCount()
-                + ", outboxKeys=" + outbox.size();
+                + ", outboxDelivered=" + outbox.deliveredCount()
+                + ", outboxQueued=" + outbox.queuedCount();
     }
 
     /**
@@ -240,7 +241,11 @@ public final class ReincarnationManager {
         }
     }
 
-    /** Off-thread: post each not-yet-sent PlayerMob death to the relay (claimed once via the outbox). */
+    /**
+     * Off-thread: enqueue each not-yet-seen PlayerMob death (full payload) into the durable outbox, then
+     * drain the whole queue. The death key is recorded as delivered only once the relay confirms a 2xx,
+     * so a failed send is retried on the next tick instead of silently dropped (at-least-once).
+     */
     private void postNewDeaths(String base, PlayerMobSeam s, List<ReincarnationRecordData> recents) {
         int noCarriage = s.noCarriage();
         for (ReincarnationRecordData d : recents) {
@@ -248,18 +253,41 @@ public final class ReincarnationManager {
                 continue; // only PlayerMob's own deaths — never re-post lives we imported (no loop)
             }
             if (!outbox.shouldPost(d.key())) {
-                continue;
+                continue; // already delivered, or already queued from an earlier tick
             }
             String snapshot = SnapshotCodec.encode(d.snapshot());
             if (snapshot == null) {
-                continue; // can't reincarnate without a snapshot — don't post a useless record
+                continue; // can't reincarnate without a snapshot — don't queue a useless record
             }
-            outbox.markPosted(d.key()); // optimistic claim: at-most-once, best-effort
             Integer carriage = d.carriage() == noCarriage ? null : d.carriage();
             String playerId = d.playerId() != null ? d.playerId().toString() : null;
             List<String> friends = SnapshotCodec.encodeAll(d.friendSnapshots());
-            RelayReincarnationClient.post(base,
+            outbox.enqueue(d.key(),
                     new PostPayload(snapshot, d.name(), playerId, carriage, d.skinUrl(), friends));
+        }
+        drainOutbox(base);
+    }
+
+    /**
+     * Retry every queued (not-yet-confirmed) death: POST it and, on a confirmed 2xx, record the dedup
+     * key and drop the payload; any other outcome keeps it for the next tick. In-flight de-dup stops a
+     * slow POST from being re-sent by the following tick. Best-effort; never throws.
+     */
+    private void drainOutbox(String base) {
+        for (Map.Entry<String, PostPayload> e : outbox.queued().entrySet()) {
+            String key = e.getKey();
+            if (!outbox.tryBeginSend(key)) {
+                continue; // a POST for this death is already in flight from a prior tick
+            }
+            RelayReincarnationClient.post(base, e.getValue()).whenComplete((status, err) -> {
+                try {
+                    if (err == null && status != null && status / 100 == 2) {
+                        outbox.markDelivered(key); // record the dedup key + remove the queued payload
+                    }
+                } finally {
+                    outbox.endSend(key);
+                }
+            });
         }
     }
 

@@ -1,6 +1,7 @@
 package games.brennan.discordpresence.discord;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mojang.logging.LogUtils;
@@ -94,10 +95,7 @@ final class DiscordWebhookClient {
 
         return DiscordHttp.sendWithRetry(req)
                 .thenApply(DiscordWebhookClient::parseMessageRef)
-                .exceptionally(t -> {
-                    LOGGER.warn("Discord webhook POST failed: {}", t.toString());
-                    return null;
-                });
+                .exceptionally(t -> onSendFailed("Discord webhook POST failed", t, webhookUrl, threadId, body));
     }
 
     /**
@@ -173,10 +171,11 @@ final class DiscordWebhookClient {
 
         return DiscordHttp.sendWithRetry(req)
                 .thenApply(DiscordWebhookClient::parseMessageRef)
-                .exceptionally(t -> {
-                    LOGGER.warn("Discord webhook report POST failed: {}", t.toString());
-                    return null;
-                });
+                // Only the JSON embed is made durable: a multipart image post (png != null) is re-queued
+                // as the embed WITHOUT the attachment image (the PNG isn't persisted), so a replay renders
+                // the report minus the gear picture rather than a broken attachment.
+                .exceptionally(t -> onSendFailed("Discord webhook report POST failed", t,
+                        webhookUrl, threadId, durableBody(root, png != null)));
     }
 
     /**
@@ -206,10 +205,86 @@ final class DiscordWebhookClient {
                 .build();
         return DiscordHttp.sendWithRetry(req)
                 .thenApply(DiscordWebhookClient::parseMessageRef)
+                // Multipart file uploads stay best-effort: the binary parts aren't persisted, so there is
+                // nothing meaningful to durably resend (the content line alone — "logs attached" — is useless
+                // without the files). Dropped on failure as before.
                 .exceptionally(t -> {
                     LOGGER.warn("Discord webhook files POST failed: {}", t.toString());
                     return null;
                 });
+    }
+
+    /**
+     * Resend a previously-queued plain-JSON webhook {@code rootJson} to {@code webhookUrl} (into
+     * {@code threadId} when non-null), reusing the same {@code ?wait=true} request the live path builds.
+     * Returns the parsed ref — non-null ⇒ a confirmed 2xx (the resend queue removes the entry); null ⇒
+     * any failure (the queue keeps it for the next flush). Unlike {@link #post}/{@link #postReport}, a
+     * failure here does <b>not</b> re-enqueue — the entry is already queued — so a flush can't grow it.
+     */
+    static CompletableFuture<DiscordMessageRef> resend(String webhookUrl, String threadId, String rootJson) {
+        if (webhookUrl == null || webhookUrl.isBlank() || rootJson == null || rootJson.isBlank()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        HttpRequest req = HttpRequest.newBuilder(URI.create(withQuery(webhookUrl, threadId)))
+                .header("Content-Type", "application/json")
+                .header("User-Agent", "DiscordPresence-Mod")
+                .timeout(DiscordHttp.TIMEOUT)
+                .POST(HttpRequest.BodyPublishers.ofString(rootJson, StandardCharsets.UTF_8))
+                .build();
+        return DiscordHttp.sendWithRetry(req)
+                .thenApply(DiscordWebhookClient::parseMessageRef)
+                .exceptionally(t -> {
+                    LOGGER.warn("Discord webhook resend failed (kept for next flush): {}", t.toString());
+                    return null;
+                });
+    }
+
+    /**
+     * Shared failure tail for the plain-JSON webhook sends. Logs, and on a provably-pre-send connection
+     * failure (a real relay/DNS outage — {@link DiscordHttp#isConnectionFailure}) spools {@code rootJson}
+     * to the durable resend queue so it isn't lost across the outage / a restart. Any other failure (an
+     * ambiguous read timeout, whose body may already be on the wire) is dropped as before, so a resend
+     * can't duplicate the message. Always returns {@code null} (the ref callers already tolerate).
+     */
+    private static DiscordMessageRef onSendFailed(String what, Throwable t, String webhookUrl,
+                                                  String threadId, String rootJson) {
+        LOGGER.warn("{}: {}", what, t.toString());
+        if (DiscordHttp.isConnectionFailure(t)) {
+            DiscordResendQueue.get().enqueue(webhookUrl, threadId, rootJson);
+        }
+        return null;
+    }
+
+    /**
+     * The plain-JSON body to durably resend. When the failed send carried a composed PNG
+     * ({@code hadAttachmentImage}), strip each embed's {@code attachment://} image ref — the PNG isn't
+     * persisted, so on replay the embed renders without the gear image rather than a broken attachment.
+     * Otherwise {@code root} is already a plain-JSON body. Deep-copies so the live object the caller may
+     * still hold is untouched.
+     */
+    static String durableBody(JsonObject root, boolean hadAttachmentImage) {
+        if (!hadAttachmentImage) {
+            return root.toString();
+        }
+        JsonObject copy = root.deepCopy();
+        JsonElement embeds = copy.get("embeds");
+        if (embeds != null && embeds.isJsonArray()) {
+            for (JsonElement e : embeds.getAsJsonArray()) {
+                if (!e.isJsonObject()) {
+                    continue;
+                }
+                JsonObject embed = e.getAsJsonObject();
+                JsonElement image = embed.get("image");
+                if (image != null && image.isJsonObject()) {
+                    JsonElement url = image.getAsJsonObject().get("url");
+                    if (url != null && url.isJsonPrimitive()
+                            && url.getAsString().startsWith("attachment://")) {
+                        embed.remove("image");
+                    }
+                }
+            }
+        }
+        return copy.toString();
     }
 
     /**

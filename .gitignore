@@ -30,3 +30,7 @@ run/
 # Runtime data — persistent player→thread map written at runtime. Not a secret,
 # but server-/run-local; never commit.
 discordpresence-threads.json
+
+# Runtime data — durable webhook resend queue. Holds the effective webhook URL (a secret in direct
+# mode), so treat like the secrets config: server-/run-local, never commit.
+discordpresence-resend-queue.json

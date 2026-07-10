@@ -33,8 +33,9 @@ public final class DiscordPresenceEvents {
         DiscordService service = DiscordService.get();
         service.loadThreads();                       // load the persisted player→thread map first
         service.loadDiscordPresence();               // and the Discord user→last-seen presence map
+        service.loadResendQueue();                   // and any webhook posts a prior outage queued
         SurveyManager.get().load();                  // and the per-player survey answers
-        service.onServerStarted(event.getServer());  // then open the gateway
+        service.onServerStarted(event.getServer());  // then open the gateway + start the resend flush
     }
 
     @SubscribeEvent

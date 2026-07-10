@@ -8,6 +8,7 @@ import java.net.UnknownHostException;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpTimeoutException;
 import java.util.OptionalLong;
+import java.util.concurrent.CompletionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -56,6 +57,27 @@ class DiscordHttpRetryTest {
         assertFalse(DiscordHttp.isRetryableException(new HttpTimeoutException("request timed out")));
         assertFalse(DiscordHttp.isRetryableException(new IOException("connection reset")));
         assertFalse(DiscordHttp.isRetryableException(new RuntimeException("unexpected")));
+    }
+
+    // --- which failures the durable resend queue enqueues on ---------------
+
+    @Test
+    void enqueuesOnlyProvablyPreSendConnectionFailures() {
+        // These never reached Discord → safe to durably resend without a duplicate.
+        assertTrue(DiscordHttp.isConnectionFailure(new ConnectException("refused")));
+        assertTrue(DiscordHttp.isConnectionFailure(new UnknownHostException("dns")));
+        assertTrue(DiscordHttp.isConnectionFailure(new HttpConnectTimeoutException("connect timed out")));
+        // As it actually arrives at a CompletableFuture.exceptionally stage: wrapped in CompletionException.
+        assertTrue(DiscordHttp.isConnectionFailure(new CompletionException(new ConnectException("refused"))));
+    }
+
+    @Test
+    void doesNotEnqueueAmbiguousReadFailuresOrNull() {
+        // A read timeout / reset may already have delivered — enqueuing would risk a duplicate, so drop.
+        assertFalse(DiscordHttp.isConnectionFailure(new HttpTimeoutException("read timed out")));
+        assertFalse(DiscordHttp.isConnectionFailure(new CompletionException(new HttpTimeoutException("read"))));
+        assertFalse(DiscordHttp.isConnectionFailure(new IOException("connection reset")));
+        assertFalse(DiscordHttp.isConnectionFailure(null));
     }
 
     // --- Retry-After parsing ----------------------------------------------

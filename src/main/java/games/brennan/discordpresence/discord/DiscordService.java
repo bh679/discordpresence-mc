@@ -80,6 +80,10 @@ public final class DiscordService {
     private static final String AUTO_RESPONSE_STORE_FILE = "discordpresence-autoresponse.json";
     private static final String PRESENCE_STORE_FILE = "discordpresence-presence.json";
     private static final String DISCORD_PRESENCE_STORE_FILE = "discordpresence-discord-presence.json";
+    private static final String RESEND_QUEUE_FILE = "discordpresence-resend-queue.json";
+
+    /** How often the durable webhook resend queue is drained (DP has no per-tick server event). */
+    private static final long RESEND_FLUSH_SECONDS = 60;
 
     private static final DiscordService INSTANCE = new DiscordService();
 
@@ -94,6 +98,12 @@ public final class DiscordService {
 
     /** Durable Discord user-id → last-seen-online presence, fed by the gateway; backs the query seam. */
     private final DiscordPresenceStore discordPresenceStore = new DiscordPresenceStore();
+
+    /**
+     * Durable resend queue for plain-JSON webhook posts a relay outage would otherwise drop; the
+     * process-wide singleton the webhook client enqueues into and this service flushes on a 60s tick.
+     */
+    private final DiscordResendQueue resendQueue = DiscordResendQueue.get();
 
     private final ConcurrentHashMap<UUID, CompletableFuture<DiscordMessageRef>> sessionMessages =
             new ConcurrentHashMap<>();
@@ -117,6 +127,9 @@ public final class DiscordService {
 
     /** The recurring online-reaction refresh/reconcile task, cancelled on server stop. */
     private volatile ScheduledFuture<?> presenceTask;
+
+    /** The recurring durable-resend-queue flush task, cancelled on server stop. */
+    private volatile ScheduledFuture<?> resendFlushTask;
 
     /** Relay-mode presence poller (feeds the last-seen-online seam); null in direct-bot mode. */
     private volatile RelayPresencePoller relayPresencePoller;
@@ -156,6 +169,11 @@ public final class DiscordService {
         discordPresenceStore.load(FMLPaths.CONFIGDIR.get().resolve(DISCORD_PRESENCE_STORE_FILE));
     }
 
+    /** Load the persisted webhook resend queue on server start (before any post can enqueue into it). */
+    public void loadResendQueue() {
+        resendQueue.load(FMLPaths.CONFIGDIR.get().resolve(RESEND_QUEUE_FILE));
+    }
+
     /**
      * Opens the gateway once the server is up, when consented and either inbound chat relay
      * ({@code relayDiscordToGame}) or presence tracking ({@code presenceTrackUserIds}) is enabled. The
@@ -176,6 +194,9 @@ public final class DiscordService {
         // Cross-world reincarnation bridge — independent of the chat/presence gateway gating below; it has
         // its own gate (relay-mode + PlayerMob present), so start it before the early returns.
         reincarnation.start(startedServer, networkAllowed(startedServer));
+        // Durable webhook resend loop — also independent of the gateway gating: it drains death/survey/
+        // chat embeds a prior relay outage queued, so start it before the early returns too.
+        startResendFlush();
         if (!enabled() || !networkAllowed(startedServer) || !(wantInbound || wantPresence)) {
             return;
         }
@@ -810,6 +831,41 @@ public final class DiscordService {
         return List.of(new DeathField(DiscordPresenceConfig.getAdvancementRequirementsLabel(), reqs));
     }
 
+    // --- durable webhook resend queue ---
+
+    /**
+     * Start the durable-resend loop: drain anything a prior outage queued now (a boot drain), then flush
+     * every {@value #RESEND_FLUSH_SECONDS}s. No-op when no webhook is configured — {@link #enabled()} is
+     * false, so a live post short-circuits before it can enqueue and the queue stays empty. Cancelled in
+     * {@link #clearAll()}. The flush holds items while consent / network are absent, so a mid-session
+     * grant is picked up on the next tick.
+     */
+    private void startResendFlush() {
+        if (!enabled()) {
+            return;
+        }
+        flushResendQueue(); // boot drain: deliver anything held from a previous run / outage
+        resendFlushTask = DiscordHttp.SCHEDULER.scheduleAtFixedRate(
+                this::flushResendQueue, RESEND_FLUSH_SECONDS, RESEND_FLUSH_SECONDS, TimeUnit.SECONDS);
+        LOGGER.info("Discord Presence: durable webhook resend queue active (flush every {}s).", RESEND_FLUSH_SECONDS);
+    }
+
+    /**
+     * Try to deliver every queued webhook post, gated on the same enable + network-consent checks as a
+     * live post: queued items are held (not sent, not dropped) while those are absent and eventually
+     * max-age evicted, so nothing is sent the user hasn't consented to. Each entry is removed only on a
+     * confirmed 2xx. Best-effort; the HTTP runs off the game thread on the shared client.
+     */
+    private void flushResendQueue() {
+        MinecraftServer srv = server;
+        if (srv == null || !enabled() || !networkAllowed(srv)) {
+            return;
+        }
+        resendQueue.flush(post ->
+                DiscordWebhookClient.resend(post.url(), post.threadId(), post.rootJson())
+                        .thenApply(ref -> ref != null));
+    }
+
     /** Drop per-session tracking + close the gateway on server stop (the durable stores stay on disk). */
     public void clearAll() {
         ScheduledFuture<?> pt = presenceTask;
@@ -828,6 +884,17 @@ public final class DiscordService {
         if (gw != null) {
             gw.stop();
         }
+
+        // Durable webhook resend queue: stop the periodic flush, then one best-effort final drain while
+        // the server is still up (singleplayer exit keeps the JVM alive long enough to deliver queued
+        // posts before the next launch; a dedicated server's daemon sends may be cut short — anything
+        // undelivered stays on disk and drains on the next server start). Runs before `server` is nulled.
+        ScheduledFuture<?> rf = resendFlushTask;
+        resendFlushTask = null;
+        if (rf != null) {
+            rf.cancel(false);
+        }
+        flushResendQueue();
 
         // Single-player / LAN host exiting to the title screen: the integrated server stops but the
         // JVM lives on, so we can actively clear the online ("green") reaction for everyone still
