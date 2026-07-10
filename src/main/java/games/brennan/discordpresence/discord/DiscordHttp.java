@@ -174,6 +174,17 @@ public final class DiscordHttp {
                 || cause instanceof HttpConnectTimeoutException;
     }
 
+    /**
+     * Whether {@code t} — as delivered to a {@link CompletableFuture#exceptionally} stage, possibly
+     * wrapped in a {@link CompletionException} — is a provably-pre-send connection failure (relay/DNS
+     * unreachable). Such a request never reached Discord, so it is safe to durably resend without
+     * risking a duplicate; ambiguous read failures return {@code false} and stay best-effort-drop,
+     * matching {@link #isRetryableException}. This is the gate the durable resend queue enqueues on.
+     */
+    static boolean isConnectionFailure(Throwable t) {
+        return t != null && isRetryableException(unwrap(t));
+    }
+
     /** Exponential backoff (1s, 2s, 4s … capped) plus a little jitter, in ms, for attempt {@code index}. */
     static long backoffMs(int attemptIndex) {
         long base = Math.min(BASE_BACKOFF_MS << Math.max(0, attemptIndex), MAX_BACKOFF_MS);

@@ -165,8 +165,14 @@ final class RelayReincarnationClient {
 
     // --- async network (best-effort) -----------------------------------------
 
-    /** Fire-and-forget ingest of one death record. Logs the outcome; never throws. */
-    static void post(String base, PostPayload payload) {
+    /**
+     * Ingest one death record. Resolves to the HTTP status code — a 2xx means the relay accepted it, so
+     * the caller may mark the death delivered and drop it — or {@code null} when the request couldn't be
+     * built or the send failed with no response (the caller keeps the death queued for a later retry).
+     * Logs the outcome; never throws. The queue-drain in {@code ReincarnationManager} owns the retry
+     * cadence, so this no longer fires-and-forgets.
+     */
+    static CompletableFuture<Integer> post(String base, PostPayload payload) {
         HttpRequest req;
         try {
             req = HttpRequest.newBuilder(URI.create(base + PATH))
@@ -177,13 +183,15 @@ final class RelayReincarnationClient {
                     .build();
         } catch (Exception e) {
             LOGGER.debug("Discord Presence: bad reincarnation POST URL ({}): {}", base, e.toString());
-            return;
+            return CompletableFuture.completedFuture(null);
         }
-        DiscordHttp.CLIENT.sendAsync(req, HttpResponse.BodyHandlers.ofString())
-                .thenAccept(resp -> {
-                    if (resp.statusCode() / 100 != 2) {
-                        LOGGER.debug("Discord Presence: reincarnation POST -> {} ({})", resp.statusCode(), resp.body());
+        return DiscordHttp.CLIENT.sendAsync(req, HttpResponse.BodyHandlers.ofString())
+                .thenApply(resp -> {
+                    int code = resp.statusCode();
+                    if (code / 100 != 2) {
+                        LOGGER.debug("Discord Presence: reincarnation POST -> {} ({})", code, resp.body());
                     }
+                    return code;
                 })
                 .exceptionally(e -> {
                     LOGGER.debug("Discord Presence: reincarnation POST failed: {}", e.toString());
