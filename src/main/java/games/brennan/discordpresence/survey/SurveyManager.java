@@ -61,12 +61,33 @@ public final class SurveyManager {
      * when the survey can't run (disabled / no webhook / no consent).
      */
     public void openSurveyFor(ServerPlayer player) {
+        openSurveyFor(player, null);
+    }
+
+    /**
+     * Open the survey on demand, optionally restricted to a single question by id — the bundling
+     * mod's targeted entry points (e.g. DT's {@code /bug}, which jumps straight to its bug-report
+     * question). A {@code null}/blank {@code onlyQuestionId} offers the full bank (the plain
+     * {@code /feedback} behaviour). When the requested id isn't in the bank the same
+     * "isn't available" message is sent and nothing opens.
+     */
+    public void openSurveyFor(ServerPlayer player, String onlyQuestionId) {
         if (!active(player)) {
             player.sendSystemMessage(Component.literal("Feedback isn't available right now."));
             return;
         }
         List<SurveyQuestionPayload.Entry> entries = allEntries();
+        if (onlyQuestionId != null && !onlyQuestionId.isBlank()) {
+            entries = entries.stream()
+                    .filter(e -> e.id().equals(onlyQuestionId))
+                    .toList();
+        }
         if (entries.isEmpty()) {
+            if (onlyQuestionId != null && !onlyQuestionId.isBlank()) {
+                // Requested a specific question that isn't loaded — tell the player rather than
+                // silently opening nothing.
+                player.sendSystemMessage(Component.literal("Feedback isn't available right now."));
+            }
             return; // no questions configured — nothing to open
         }
         DPNetwork.sendTo(player, new SurveyOpenPayload(entries));

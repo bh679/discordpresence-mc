@@ -167,6 +167,8 @@ public final class SurveyScreen extends Screen {
         }
         int score = hasScale ? selectedScore : 0; // text questions carry no rating
         DPNetwork.sendToServer(new SurveySubmitPayload(q.id(), score, comment));
+        // Let a bundling mod react to this submission (e.g. DT collects logs for a bug answer).
+        SurveySubmitClientHook.fire(q, score);
         advance();
     }
 
