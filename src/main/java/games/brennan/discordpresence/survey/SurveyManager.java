@@ -73,7 +73,7 @@ public final class SurveyManager {
      */
     public void openSurveyFor(ServerPlayer player, String onlyQuestionId) {
         if (!active(player)) {
-            player.sendSystemMessage(Component.literal("Feedback isn't available right now."));
+            player.sendSystemMessage(Component.translatable("discordpresence.survey.unavailable"));
             return;
         }
         List<SurveyQuestionPayload.Entry> entries = allEntries();
@@ -86,7 +86,7 @@ public final class SurveyManager {
             if (onlyQuestionId != null && !onlyQuestionId.isBlank()) {
                 // Requested a specific question that isn't loaded — tell the player rather than
                 // silently opening nothing.
-                player.sendSystemMessage(Component.literal("Feedback isn't available right now."));
+                player.sendSystemMessage(Component.translatable("discordpresence.survey.unavailable"));
             }
             return; // no questions configured — nothing to open
         }

@@ -35,7 +35,9 @@ public final class ChatConnectCommand {
     private static int report(CommandContext<CommandSourceStack> ctx) {
         boolean enabled = DiscordPresenceClientConfig.getConsent() == Consent.GRANTED;
         ctx.getSource().sendSuccess(
-                () -> Component.literal("Online features are currently " + (enabled ? "enabled" : "disabled") + "."),
+                () -> Component.translatable(enabled
+                        ? "discordpresence.chatconnect.status_enabled"
+                        : "discordpresence.chatconnect.status_disabled"),
                 false);
         return 1;
     }
@@ -43,9 +45,9 @@ public final class ChatConnectCommand {
     private static int set(CommandContext<CommandSourceStack> ctx, Consent consent) {
         DiscordPresenceClientConfig.setConsent(consent);
         ctx.getSource().sendSuccess(
-                () -> Component.literal(consent == Consent.GRANTED
-                        ? "Online features enabled."
-                        : "Online features disabled."),
+                () -> Component.translatable(consent == Consent.GRANTED
+                        ? "discordpresence.chatconnect.set_enabled"
+                        : "discordpresence.chatconnect.set_disabled"),
                 false);
         return 1;
     }
