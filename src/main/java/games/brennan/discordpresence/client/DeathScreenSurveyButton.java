@@ -42,7 +42,7 @@ public final class DeathScreenSurveyButton {
         }
         int x = death.width / 2 - WIDTH / 2;
         int y = death.height - 30;
-        button = Button.builder(Component.literal("Give Feedback"), b -> openSurvey())
+        button = Button.builder(Component.translatable("discordpresence.survey.give_feedback"), b -> openSurvey())
                 .bounds(x, y, WIDTH, HEIGHT)
                 .build();
         button.visible = SurveyClientState.hasQuestions();

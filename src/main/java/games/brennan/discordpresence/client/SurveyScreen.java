@@ -44,7 +44,7 @@ public final class SurveyScreen extends Screen {
     private Button submitButton;
 
     public SurveyScreen(Screen parent, List<SurveyQuestionPayload.Entry> questions) {
-        super(Component.literal("Feedback")); // narration title
+        super(Component.translatable("discordpresence.survey.title")); // narration title
         this.parent = parent;
         this.questions = List.copyOf(questions);
     }
@@ -109,12 +109,13 @@ public final class SurveyScreen extends Screen {
         // Comment box (fresh per question): an optional reason for a scale question, or the
         // required sole answer for a text question.
         if (q.allowComment()) {
-            commentBox = new EditBox(this.font, left, y, CONTENT_WIDTH, 20, Component.literal("Comment"));
+            commentBox = new EditBox(this.font, left, y, CONTENT_WIDTH, 20,
+                    Component.translatable("discordpresence.survey.comment"));
             commentBox.setMaxLength(256);
-            commentBox.setHint(Component.literal(
-                    isChoice ? "Add any details (optional)"
-                            : hasScale ? "What's the main reason for your score? (optional)"
-                            : "Type your answer here…"));
+            commentBox.setHint(Component.translatable(
+                    isChoice ? "discordpresence.survey.hint.choice"
+                            : hasScale ? "discordpresence.survey.hint.scale"
+                            : "discordpresence.survey.hint.text"));
             if (!hasScale) {
                 // No score to gate on — enable Submit only once the player has typed an answer.
                 commentBox.setResponder(text -> submitButton.active = !text.trim().isEmpty());
@@ -132,14 +133,15 @@ public final class SurveyScreen extends Screen {
 
         // Skip — always enabled. Advances without submitting, so nothing posts for this question;
         // lets a player move past the rating to the later questions without answering it.
-        Button skipButton = Button.builder(Component.literal("Skip"), b -> skip())
+        Button skipButton = Button.builder(Component.translatable("discordpresence.survey.skip"), b -> skip())
                 .bounds(rowX, y, SKIP_W, 20)
                 .build();
         addRenderableWidget(skipButton);
 
         // Submit (+ advance). Enabled by a score pick (scale question) or once the answer box is
         // non-empty (text question); see the responder above.
-        submitButton = Button.builder(Component.literal(last ? "Submit" : "Submit & next"), b -> submit())
+        submitButton = Button.builder(Component.translatable(
+                last ? "discordpresence.survey.submit" : "discordpresence.survey.submit_next"), b -> submit())
                 .bounds(rowX + SKIP_W + BUTTON_GAP, y, SUBMIT_W, 20)
                 .build();
         submitButton.active = false;
@@ -199,7 +201,7 @@ public final class SurveyScreen extends Screen {
         // Progress indicator when there's more than one question to walk.
         if (questions.size() > 1) {
             graphics.drawCenteredString(this.font,
-                    Component.literal("Question " + (index + 1) + " of " + questions.size()),
+                    Component.translatable("discordpresence.survey.progress", index + 1, questions.size()),
                     this.width / 2, promptTop() - 14, 0xA0A0A0);
         }
 

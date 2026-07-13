@@ -1,0 +1,25 @@
+{
+  "discordpresence.consent.title": "Connect to the internet?",
+  "discordpresence.consent.body": "This mod can use an online connection for:",
+  "discordpresence.consent.feature_fallback": "Reactions, chat relay, and join/death reports.",
+  "discordpresence.consent.footnote": "Change anytime in config or with /chatconnect on.",
+  "discordpresence.consent.enable": "Enable",
+  "discordpresence.consent.not_now": "Not now",
+
+  "discordpresence.survey.give_feedback": "Give Feedback",
+  "discordpresence.survey.title": "Feedback",
+  "discordpresence.survey.comment": "Comment",
+  "discordpresence.survey.hint.choice": "Add any details (optional)",
+  "discordpresence.survey.hint.scale": "What's the main reason for your score? (optional)",
+  "discordpresence.survey.hint.text": "Type your answer here…",
+  "discordpresence.survey.skip": "Skip",
+  "discordpresence.survey.submit": "Submit",
+  "discordpresence.survey.submit_next": "Submit & next",
+  "discordpresence.survey.progress": "Question %s of %s",
+  "discordpresence.survey.unavailable": "Feedback isn't available right now.",
+
+  "discordpresence.chatconnect.status_enabled": "Online features are currently enabled.",
+  "discordpresence.chatconnect.status_disabled": "Online features are currently disabled.",
+  "discordpresence.chatconnect.set_enabled": "Online features enabled.",
+  "discordpresence.chatconnect.set_disabled": "Online features disabled."
+}

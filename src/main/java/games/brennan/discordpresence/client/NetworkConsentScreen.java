@@ -26,10 +26,15 @@ import java.util.List;
  */
 public final class NetworkConsentScreen extends Screen {
 
-    private static final String TITLE = "Connect to the internet?";
-    private static final String BODY = "This mod can use an online connection for:";
-    private static final String FALLBACK_FEATURE = "Reactions, chat relay, and join/death reports.";
-    private static final String FOOTNOTE = "Change anytime in config or with /chatconnect on.";
+    // Localisable text keys (English defaults live in assets/discordpresence/lang/en_us.json). The
+    // feature bullets come from the bundling mod as raw Strings; only the standalone-DP fallback
+    // bullet is a lang key here.
+    private static final String KEY_TITLE = "discordpresence.consent.title";
+    private static final String KEY_BODY = "discordpresence.consent.body";
+    private static final String KEY_FEATURE_FALLBACK = "discordpresence.consent.feature_fallback";
+    private static final String KEY_FOOTNOTE = "discordpresence.consent.footnote";
+    private static final String KEY_ENABLE = "discordpresence.consent.enable";
+    private static final String KEY_NOT_NOW = "discordpresence.consent.not_now";
 
     // Flat card geometry.
     private static final int CARD_W = 300;
@@ -78,7 +83,7 @@ public final class NetworkConsentScreen extends Screen {
     private int footnoteY;
 
     public NetworkConsentScreen(Screen previousScreen) {
-        super(Component.literal(TITLE)); // narration title
+        super(Component.translatable(KEY_TITLE)); // narration title
         this.previousScreen = previousScreen;
     }
 
@@ -88,15 +93,23 @@ public final class NetworkConsentScreen extends Screen {
         int bulletTextWidth = innerWidth - BULLET_TEXT_INSET;
 
         // Wrap each text section to the card's inner width.
-        bodyLines = font.split(Component.literal(BODY), innerWidth);
+        bodyLines = font.split(Component.translatable(KEY_BODY), innerWidth);
 
-        List<String> features = DiscordCredentials.providerNetworkConsentFeatures();
-        if (features == null || features.isEmpty()) {
-            features = List.of(FALLBACK_FEATURE); // standalone DP — generic fallback bullet
+        // Provider-fed feature bullets are host content (raw Strings → literal); the standalone-DP
+        // fallback is the one translatable bullet.
+        List<String> providerFeatures = DiscordCredentials.providerNetworkConsentFeatures();
+        List<Component> features;
+        if (providerFeatures == null || providerFeatures.isEmpty()) {
+            features = List.of(Component.translatable(KEY_FEATURE_FALLBACK));
+        } else {
+            features = new ArrayList<>(providerFeatures.size());
+            for (String feature : providerFeatures) {
+                features.add(Component.literal(feature));
+            }
         }
         List<List<FormattedCharSequence>> blocks = new ArrayList<>(features.size());
-        for (String feature : features) {
-            blocks.add(font.split(Component.literal(feature), bulletTextWidth));
+        for (Component feature : features) {
+            blocks.add(font.split(feature, bulletTextWidth));
         }
         bulletBlocks = blocks;
 
@@ -111,7 +124,7 @@ public final class NetworkConsentScreen extends Screen {
         }
         nonBulletBlocks = negBlocks;
 
-        footnoteLines = font.split(Component.literal(FOOTNOTE), innerWidth);
+        footnoteLines = font.split(Component.translatable(KEY_FOOTNOTE), innerWidth);
 
         // Sum content heights + gaps to size the panel, then centre it.
         int bulletsH = 0;
@@ -163,10 +176,10 @@ public final class NetworkConsentScreen extends Screen {
         int innerLeft = panelX + PAD;
         int buttonW = (innerWidth - BUTTON_GAP) / 2;
         int buttonY = cursor;
-        addRenderableWidget(Button.builder(Component.literal("Enable"), b -> answer(Consent.GRANTED))
+        addRenderableWidget(Button.builder(Component.translatable(KEY_ENABLE), b -> answer(Consent.GRANTED))
                 .bounds(innerLeft, buttonY, buttonW, BUTTON_H)
                 .build());
-        addRenderableWidget(Button.builder(Component.literal("Not now"), b -> answer(Consent.DENIED))
+        addRenderableWidget(Button.builder(Component.translatable(KEY_NOT_NOW), b -> answer(Consent.DENIED))
                 .bounds(innerLeft + buttonW + BUTTON_GAP, buttonY, innerWidth - buttonW - BUTTON_GAP, BUTTON_H)
                 .build());
     }
@@ -194,7 +207,7 @@ public final class NetworkConsentScreen extends Screen {
         super.render(graphics, mouseX, mouseY, partialTick);
 
         // Text on top of the card.
-        graphics.drawCenteredString(font, Component.literal(TITLE), centerX, titleY, COLOR_TITLE);
+        graphics.drawCenteredString(font, Component.translatable(KEY_TITLE), centerX, titleY, COLOR_TITLE);
 
         int y = bodyY;
         for (FormattedCharSequence line : bodyLines) {
