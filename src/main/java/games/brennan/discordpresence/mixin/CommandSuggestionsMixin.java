@@ -8,6 +8,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.CommandSuggestions;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.resources.language.I18n;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.network.chat.Style;
 import net.minecraft.util.FormattedCharSequence;
@@ -57,7 +58,7 @@ public abstract class CommandSuggestionsMixin {
                             + "Ljava/util/concurrent/CompletableFuture;"),
             index = 0)
     private Iterable<String> discordpresence$addChatTags(Iterable<String> vanilla) {
-        return ClientChatTags.augment(vanilla);
+        return ClientChatTags.augment(vanilla, ClientChatTags.displayTokens(I18n::get));
     }
 
     @Inject(method = "updateCommandInfo", at = @At("TAIL"))
@@ -80,7 +81,7 @@ public abstract class CommandSuggestionsMixin {
         if (this.currentParse != null) {
             return; // a command — leave vanilla's argument highlighting
         }
-        List<String> tokens = ClientChatTags.tokens();
+        List<String> tokens = ClientChatTags.highlightTokens(I18n::get);
         boolean[] mask = ChatTagHighlighter.highlightMask(text, tokens);
         boolean any = false;
         for (boolean b : mask) {

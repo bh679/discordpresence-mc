@@ -18,6 +18,8 @@
   "discordpresence.survey.progress": "Question %s of %s",
   "discordpresence.survey.unavailable": "Feedback isn't available right now.",
 
+  "discordpresence.chattag.dev": "@dev",
+
   "discordpresence.chatconnect.status_enabled": "Online features are currently enabled.",
   "discordpresence.chatconnect.status_disabled": "Online features are currently disabled.",
   "discordpresence.chatconnect.set_enabled": "Online features enabled.",
