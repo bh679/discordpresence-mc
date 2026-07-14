@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.function.UnaryOperator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -37,6 +39,48 @@ class ClientChatTagsTest {
         List<String> out = new ArrayList<>();
         ClientChatTags.augment(List.of()).forEach(out::add);
         assertTrue(out.contains("@dev"), "default tokens include @dev");
+    }
+
+    // --- displayTokens / highlightTokens: per-locale display of the developer tag ---
+
+    /** A translator backed by a fixed lang map; unknown keys echo back (vanilla I18n behaviour). */
+    private static UnaryOperator<String> translator(Map<String, String> lang) {
+        return key -> lang.getOrDefault(key, key);
+    }
+
+    @Test
+    void displayTokensLocalizesDevAndKeepsBrennanhatton() {
+        UnaryOperator<String> zh = translator(Map.of("discordpresence.chattag.dev", "@开发者"));
+        assertEquals(List.of("@开发者", "@brennanhatton"), ClientChatTags.displayTokens(zh));
+    }
+
+    @Test
+    void displayTokensEnglishKeepsDev() {
+        UnaryOperator<String> en = translator(Map.of("discordpresence.chattag.dev", "@dev"));
+        assertEquals(List.of("@dev", "@brennanhatton"), ClientChatTags.displayTokens(en));
+    }
+
+    @Test
+    void displayTokensFallsBackWhenKeyEchoedBack() {
+        // No mapping → I18n echoes the key; the alias must be rejected and the base token kept.
+        UnaryOperator<String> missing = translator(Map.of());
+        assertEquals(List.of("@dev", "@brennanhatton"), ClientChatTags.displayTokens(missing));
+    }
+
+    @Test
+    void displayTokensRejectsNonTagAlias() {
+        // A translation that isn't a valid @tag must not be shown as a token.
+        UnaryOperator<String> bad = translator(Map.of("discordpresence.chattag.dev", "developer"));
+        assertEquals(List.of("@dev", "@brennanhatton"), ClientChatTags.displayTokens(bad));
+    }
+
+    @Test
+    void highlightTokensUnionsBaseAndLocalized() {
+        UnaryOperator<String> zh = translator(Map.of("discordpresence.chattag.dev", "@开发者"));
+        List<String> hi = ClientChatTags.highlightTokens(zh);
+        assertTrue(hi.contains("@dev"), "base token still highlighted");
+        assertTrue(hi.contains("@开发者"), "localized alias highlighted");
+        assertTrue(hi.contains("@brennanhatton"), "unlocalized token highlighted");
     }
 
     // --- shouldAutoShow: auto-open the popup only while typing an @tag in plain chat ---
