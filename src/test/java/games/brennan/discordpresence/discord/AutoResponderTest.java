@@ -3,11 +3,16 @@ package games.brennan.discordpresence.discord;
 import games.brennan.discordpresence.config.DiscordPresenceConfig;
 import org.junit.jupiter.api.Test;
 
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -125,6 +130,68 @@ class AutoResponderTest {
     @Test
     void composeNullTemplateReturnsNull() {
         assertNull(AutoResponder.compose(null, "Steve", "a", "b", "c"));
+    }
+
+    // --- translationKey: localized-pool key selection ---
+
+    @Test
+    void translationKeyIndexesFromBase() {
+        assertEquals("base.0", AutoResponder.translationKey("base", 0, 3));
+        assertEquals("base.1", AutoResponder.translationKey("base", 1, 3));
+        assertEquals("base.2", AutoResponder.translationKey("base", 2, 3));
+    }
+
+    @Test
+    void translationKeyWrapsRollModuloCount() {
+        assertEquals("base.0", AutoResponder.translationKey("base", 3, 3)); // wraps
+        assertEquals("base.1", AutoResponder.translationKey("base", 7, 3)); // 7 % 3 == 1
+    }
+
+    @Test
+    void translationKeyHandlesNegativeRoll() {
+        assertEquals("base.2", AutoResponder.translationKey("base", -1, 3)); // floorMod(-1, 3) == 2
+    }
+
+    @Test
+    void translationKeyNullWhenCountNonPositive() {
+        assertNull(AutoResponder.translationKey("base", 0, 0));
+        assertNull(AutoResponder.translationKey("base", 5, -1));
+    }
+
+    // --- count guard: the *_KEY_COUNT constants must match the keys shipped in en_us.json ---
+
+    @Test
+    void keyCountsMatchLangFile() {
+        String lang = readEnUs();
+        assertKeyPoolContiguous(lang, "discordpresence.autoresponse.alone", AutoResponder.ALONE_KEY_COUNT);
+        assertKeyPoolContiguous(lang, "discordpresence.autoresponse.group", AutoResponder.GROUP_KEY_COUNT);
+        assertKeyPoolContiguous(lang, "discordpresence.autoresponse.mention_hint",
+                AutoResponder.MENTION_HINT_KEY_COUNT);
+    }
+
+    /** Assert en_us has exactly keys {@code base.0 .. base.<count-1>} and no {@code base.<count>}. */
+    private static void assertKeyPoolContiguous(String lang, String base, int count) {
+        // Count "base.<int>" keys present, and record the highest index, to catch both drift directions.
+        Pattern p = Pattern.compile('"' + Pattern.quote(base) + "\\.(\\d+)\"");
+        Matcher m = p.matcher(lang);
+        int found = 0;
+        int max = -1;
+        while (m.find()) {
+            found++;
+            max = Math.max(max, Integer.parseInt(m.group(1)));
+        }
+        assertEquals(count, found, "key count for " + base + " must equal " + base.toUpperCase() + "_KEY_COUNT");
+        assertEquals(count - 1, max, "keys for " + base + " must be contiguous 0.." + (count - 1));
+    }
+
+    private static String readEnUs() {
+        try (InputStream in = AutoResponderTest.class.getResourceAsStream(
+                "/assets/discordpresence/lang/en_us.json")) {
+            assertNotNull(in, "en_us.json must be on the test classpath");
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     // --- hasActiveDiscordConversation: the engaged-only gate's "Discord is talking to this player" read ---

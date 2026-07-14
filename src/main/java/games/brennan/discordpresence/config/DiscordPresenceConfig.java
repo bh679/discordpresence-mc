@@ -76,6 +76,7 @@ public final class DiscordPresenceConfig {
     public static final String DEFAULT_DISCORD_TO_GAME_FORMAT = "<{user}> {msg}";
 
     public static final boolean DEFAULT_AUTO_RESPONSE_ENABLED = true;
+    public static final boolean DEFAULT_LOCALIZE_AUTO_RESPONSE = true;
     public static final int DEFAULT_AUTO_RESPONSE_REARM_MINUTES = 30;
     public static final int DEFAULT_AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS = 30;
     public static final int DEFAULT_AUTO_RESPONSE_GROUP_COOLDOWN_SECONDS = 300;
@@ -140,6 +141,7 @@ public final class DiscordPresenceConfig {
     public static final ModConfigSpec.BooleanValue ONLY_DISPLAY_ADVANCEMENTS;
     public static final ModConfigSpec.ConfigValue<String> ADVANCEMENT_MESSAGE_TEMPLATE;
     public static final ModConfigSpec.BooleanValue AUTO_RESPONSE_ENABLED;
+    public static final ModConfigSpec.BooleanValue LOCALIZE_AUTO_RESPONSE;
     public static final ModConfigSpec.IntValue AUTO_RESPONSE_REARM_MINUTES;
     public static final ModConfigSpec.IntValue AUTO_RESPONSE_ALONE_COOLDOWN_SECONDS;
     public static final ModConfigSpec.ConfigValue<String> AUTO_RESPONSE_ALONE_TEMPLATE;
@@ -400,6 +402,12 @@ public final class DiscordPresenceConfig {
                          "Discord; the chat line itself still relays via relayGameToDiscord. Turns off once a",
                          "Discord reply reaches the server, re-arming after rearmMinutes of silence.")
                 .define("enabled", DEFAULT_AUTO_RESPONSE_ENABLED);
+        LOCALIZE_AUTO_RESPONSE = b
+                .comment("When true (default), auto-response flavour lines are sent as translatable keys",
+                         "(discordpresence.autoresponse.*) so each client renders them in its own language.",
+                         "When false, the literal verb/place/phrase/groupMessages/mentionHintMessages lists",
+                         "below are composed and sent as fixed text (single language, but fully operator-authored).")
+                .define("localizeAutoResponse", DEFAULT_LOCALIZE_AUTO_RESPONSE);
         AUTO_RESPONSE_REARM_MINUTES = b
                 .comment("Minutes of Discord silence (no relayed reply for that player) before auto-responses",
                          "re-arm. For local games this is remembered across worlds.")
@@ -703,6 +711,10 @@ public final class DiscordPresenceConfig {
 
     public static boolean isAutoResponseEnabled() {
         return isLoaded() ? AUTO_RESPONSE_ENABLED.get() : DEFAULT_AUTO_RESPONSE_ENABLED;
+    }
+
+    public static boolean isLocalizeAutoResponse() {
+        return isLoaded() ? LOCALIZE_AUTO_RESPONSE.get() : DEFAULT_LOCALIZE_AUTO_RESPONSE;
     }
 
     public static int getAutoResponseRearmMinutes() {

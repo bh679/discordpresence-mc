@@ -38,6 +38,19 @@ final class AutoResponder {
     /** Hard floor: never more than one auto-response per 30 seconds, whatever the config says. */
     private static final int MIN_COOLDOWN_SECONDS = 30;
 
+    // Translation-key pools for the localized path (localizeAutoResponse = true). Each base has
+    // discordpresence.autoresponse.<base>.0 .. .<count-1> whole-sentence keys taking a single
+    // '%s' player placeholder. COUNTS MUST MATCH the number of keys in en_us.json — the
+    // AutoResponderTest count-guard parses the lang file to keep them in lock-step.
+    private static final String ALONE_KEY_BASE = "discordpresence.autoresponse.alone";
+    private static final String GROUP_KEY_BASE = "discordpresence.autoresponse.group";
+    private static final String MENTION_HINT_KEY_BASE = "discordpresence.autoresponse.mention_hint";
+    /** The per-locale developer @-mention tag (e.g. {@code @dev} / {@code @开发者}); fed to the hint as its 2nd arg. */
+    private static final String DEV_TAG_KEY = "discordpresence.chattag.dev";
+    static final int ALONE_KEY_COUNT = 12;
+    static final int GROUP_KEY_COUNT = 3;
+    static final int MENTION_HINT_KEY_COUNT = 12;
+
     /** Delay before the whisper shows, so it lands AFTER the player's own chat line. */
     private static final long WHISPER_DELAY_MILLIS = 300L;
 
@@ -115,30 +128,71 @@ final class AutoResponder {
         }
 
         String name = player.getGameProfile().getName();
-        // Alone: assemble "{player} {verb} into the {place}, {phrase}" from random picks.
-        // Group (others online): pick from the flat group message list.
-        String line = alone ? composeAloneWhisper(name) : pickGroupMessage(name);
-        if (line == null || line.isBlank()) {
+        boolean localize = DiscordPresenceConfig.isLocalizeAutoResponse();
+        // Alone: "{player} {verb} into the {place}, {phrase}"-style whisper.
+        // Group (others online): a "mutters to themselves" flavour line.
+        // Localized path emits a translatable key (rendered per-client locale); the literal path
+        // composes the operator-authored config lists into fixed text.
+        Component whisper = alone
+                ? aloneWhisper(name, localize)
+                : groupWhisper(name, localize);
+        if (whisper == null) {
             return; // this mode's message pool is empty
         }
         lastWhisper.put(uuid, now);
         // Grey, like a system message. Delayed so it lands AFTER the player's own chat line — the modern
         // chat broadcast is asynchronous, so an immediate server-thread enqueue still raced ahead of it.
         // A system message never re-fires ServerChatEvent, so there is no relay loop.
-        scheduleGrayBroadcast(server, line, WHISPER_DELAY_MILLIS);
+        scheduleGrayBroadcast(server, whisper, WHISPER_DELAY_MILLIS);
 
         // Second line: nudge the player to tag the dev so they can actually be heard.
         if (suggestMention) {
-            String hint = pickMentionHint(name);
-            if (hint != null && !hint.isBlank()) {
+            Component hint = mentionHint(name, localize);
+            if (hint != null) {
                 scheduleGrayBroadcast(server, hint, MENTION_HINT_DELAY_MILLIS);
             }
         }
     }
 
+    /** The alone whisper as a grey-ready component: a translatable key (localized) or composed literal. */
+    private static Component aloneWhisper(String name, boolean localize) {
+        if (localize) {
+            String key = translationKey(ALONE_KEY_BASE, ThreadLocalRandom.current().nextInt(ALONE_KEY_COUNT),
+                    ALONE_KEY_COUNT);
+            return key == null ? null : Component.translatable(key, name);
+        }
+        String line = composeAloneWhisper(name);
+        return (line == null || line.isBlank()) ? null : Component.literal(line);
+    }
+
+    /** The group (others-online) whisper as a grey-ready component. */
+    private static Component groupWhisper(String name, boolean localize) {
+        if (localize) {
+            String key = translationKey(GROUP_KEY_BASE, ThreadLocalRandom.current().nextInt(GROUP_KEY_COUNT),
+                    GROUP_KEY_COUNT);
+            return key == null ? null : Component.translatable(key, name);
+        }
+        String line = pickGroupMessage(name);
+        return (line == null || line.isBlank()) ? null : Component.literal(line);
+    }
+
+    /** The "tag the dev" hint as a grey-ready component, or null when the pool is empty. */
+    private static Component mentionHint(String name, boolean localize) {
+        if (localize) {
+            String key = translationKey(MENTION_HINT_KEY_BASE,
+                    ThreadLocalRandom.current().nextInt(MENTION_HINT_KEY_COUNT), MENTION_HINT_KEY_COUNT);
+            // 2nd arg is the per-locale dev tag so the hint names the token the player actually types
+            // on their client (@dev / @开发者), not a hardcoded one.
+            return key == null ? null
+                    : Component.translatable(key, name, Component.translatable(DEV_TAG_KEY));
+        }
+        String line = pickMentionHint(name);
+        return (line == null || line.isBlank()) ? null : Component.literal(line);
+    }
+
     /** Schedule a grey system broadcast after {@code delayMillis}, hopped onto the server thread; never throws. */
-    private void scheduleGrayBroadcast(MinecraftServer server, String line, long delayMillis) {
-        Component message = Component.literal(line).withStyle(ChatFormatting.GRAY);
+    private void scheduleGrayBroadcast(MinecraftServer server, Component line, long delayMillis) {
+        Component message = line.copy().withStyle(ChatFormatting.GRAY);
         scheduler.schedule(() -> {
             try {
                 server.execute(() -> server.getPlayerList().broadcastSystemMessage(message, false));
@@ -207,6 +261,14 @@ final class AutoResponder {
     /** The configured cooldown, floored at {@link #MIN_COOLDOWN_SECONDS} (one auto-response per 30s max). */
     static int effectiveCooldownSeconds(int configuredSeconds) {
         return Math.max(MIN_COOLDOWN_SECONDS, configuredSeconds);
+    }
+
+    /** Translation key {@code base.<roll mod count>} for the localized pools; null when {@code count <= 0}. */
+    static String translationKey(String base, int roll, int count) {
+        if (count <= 0) {
+            return null;
+        }
+        return base + "." + Math.floorMod(roll, count);
     }
 
     /** Pick a message by {@code roll} (mod size) and substitute {@code {player}}; null when empty. */
