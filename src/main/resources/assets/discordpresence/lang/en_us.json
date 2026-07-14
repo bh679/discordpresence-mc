@@ -23,5 +23,35 @@
   "discordpresence.chatconnect.status_enabled": "Online features are currently enabled.",
   "discordpresence.chatconnect.status_disabled": "Online features are currently disabled.",
   "discordpresence.chatconnect.set_enabled": "Online features enabled.",
-  "discordpresence.chatconnect.set_disabled": "Online features disabled."
+  "discordpresence.chatconnect.set_disabled": "Online features disabled.",
+
+  "discordpresence.autoresponse.alone.0": "%s whispers into the void, will anyone answer?",
+  "discordpresence.autoresponse.alone.1": "%s yells into the darkness, but no one stirs…",
+  "discordpresence.autoresponse.alone.2": "%s mutters into the ether, hoping for a reply…",
+  "discordpresence.autoresponse.alone.3": "%s calls out into the silence, who's out there?",
+  "discordpresence.autoresponse.alone.4": "%s murmurs into the abyss, waiting for an echo…",
+  "discordpresence.autoresponse.alone.5": "%s screams into the emptiness, is the void listening?",
+  "discordpresence.autoresponse.alone.6": "%s pleads into the shadows, maybe the world is listening?",
+  "discordpresence.autoresponse.alone.7": "%s echoes into the wilderness, a voice in the dark…",
+  "discordpresence.autoresponse.alone.8": "%s cries out into the expanse, perhaps a friend lurks nearby…",
+  "discordpresence.autoresponse.alone.9": "%s shouts into the nothingness, the silence lingers…",
+  "discordpresence.autoresponse.alone.10": "%s hollers into the unknown, is anyone there?",
+  "discordpresence.autoresponse.alone.11": "%s bellows into the open world, will the echo return?",
+
+  "discordpresence.autoresponse.group.0": "%s mutters to themselves…",
+  "discordpresence.autoresponse.group.1": "%s trails off, half-listening…",
+  "discordpresence.autoresponse.group.2": "%s murmurs something under their breath…",
+
+  "discordpresence.autoresponse.mention_hint.0": "perhaps if %s tagged %s it might land",
+  "discordpresence.autoresponse.mention_hint.1": "perhaps if %s tagged %s they might be heard",
+  "discordpresence.autoresponse.mention_hint.2": "perhaps if %s tagged %s, someone might finally stir",
+  "discordpresence.autoresponse.mention_hint.3": "perhaps if %s tagged %s, the words might find their way",
+  "discordpresence.autoresponse.mention_hint.4": "perhaps if %s tagged %s, an answer might come",
+  "discordpresence.autoresponse.mention_hint.5": "perhaps if %s tagged %s, the silence might break",
+  "discordpresence.autoresponse.mention_hint.6": "perhaps if %s tagged %s, a reply might echo back",
+  "discordpresence.autoresponse.mention_hint.7": "perhaps if %s tagged %s, the void might listen",
+  "discordpresence.autoresponse.mention_hint.8": "perhaps if %s tagged %s, the message might reach beyond",
+  "discordpresence.autoresponse.mention_hint.9": "perhaps if %s tagged %s, an ear might turn their way",
+  "discordpresence.autoresponse.mention_hint.10": "perhaps if %s tagged %s, they might not whisper alone",
+  "discordpresence.autoresponse.mention_hint.11": "perhaps if %s tagged %s, help might be on the way"
 }
