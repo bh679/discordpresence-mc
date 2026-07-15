@@ -2,8 +2,11 @@ package games.brennan.discordpresence.survey;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Set;
 
@@ -187,6 +190,67 @@ class SurveyTest {
             assertNotNull(SurveyRegistry.byId("test:dd"), "byId finds data-driven questions");
         } finally {
             SurveyRegistry.setDataDriven(List.of()); // don't leak into other tests
+        }
+    }
+
+    // --- Survey prompt/option translation keys (SurveyKeys) + lang-file coverage ---
+
+    @Test
+    void surveyKeysDeriveFromId() {
+        assertEquals("discordpresence.survey.q.nps", SurveyKeys.promptKey("discordpresence:nps"));
+        assertEquals("discordpresence.survey.q.bug_report", SurveyKeys.promptKey("dungeontrain:bug_report"));
+        assertEquals("discordpresence.survey.q.change_one_thing",
+                SurveyKeys.promptKey("dungeontrain:change_one_thing"));
+        assertEquals("discordpresence.survey.q.bug_report.option.0",
+                SurveyKeys.optionKey("dungeontrain:bug_report", 0));
+        assertEquals("discordpresence.survey.q.bug_report.option.3",
+                SurveyKeys.optionKey("dungeontrain:bug_report", 3));
+        // A '/' in the path flattens to '.'; a bare id (no namespace) is used as-is.
+        assertEquals("discordpresence.survey.q.a.b", SurveyKeys.promptKey("ns:a/b"));
+        assertEquals("discordpresence.survey.q.plain", SurveyKeys.promptKey("plain"));
+    }
+
+    /** Every prompt/option key the client derives must exist and be non-blank in BOTH lang files. */
+    @Test
+    void langFilesContainAllSurveyKeys() {
+        List<String> keys = List.of(
+                SurveyKeys.promptKey(SurveyRegistry.NPS_ID),
+                SurveyKeys.promptKey("dungeontrain:bug_report"),
+                SurveyKeys.optionKey("dungeontrain:bug_report", 0),
+                SurveyKeys.optionKey("dungeontrain:bug_report", 1),
+                SurveyKeys.optionKey("dungeontrain:bug_report", 2),
+                SurveyKeys.optionKey("dungeontrain:bug_report", 3),
+                SurveyKeys.promptKey("dungeontrain:change_one_thing"));
+        JsonObject en = readLang("en_us");
+        JsonObject zh = readLang("zh_cn");
+        for (String key : keys) {
+            assertTrue(en.has(key), "en_us.json missing survey key " + key);
+            assertFalse(en.get(key).getAsString().isBlank(), "en_us." + key + " is blank");
+            assertTrue(zh.has(key), "zh_cn.json missing survey key " + key);
+            String zhVal = zh.get(key).getAsString();
+            assertFalse(zhVal.isBlank(), "zh_cn." + key + " is blank");
+            assertTrue(zhVal.chars().anyMatch(c -> c > 0x7F),
+                    "zh_cn." + key + " should be localized (non-ASCII), was: " + zhVal);
+        }
+    }
+
+    /** The NPS English key must equal the code literal (both in this repo) — locks against drift. */
+    @Test
+    void npsEnglishKeyMatchesLiteral() {
+        String literal = SurveyRegistry.byId(SurveyRegistry.NPS_ID).prompt();
+        String enValue = readLang("en_us").get(SurveyKeys.promptKey(SurveyRegistry.NPS_ID)).getAsString();
+        assertEquals(literal, enValue,
+                "en_us NPS prompt must match the SurveyRegistry literal (the Discord/UI fallback)");
+    }
+
+    private static JsonObject readLang(String locale) {
+        try (InputStream in = SurveyTest.class.getResourceAsStream(
+                "/assets/discordpresence/lang/" + locale + ".json")) {
+            assertNotNull(in, locale + ".json must be on the test classpath");
+            return JsonParser.parseString(new String(in.readAllBytes(), StandardCharsets.UTF_8))
+                    .getAsJsonObject();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 }

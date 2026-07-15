@@ -18,6 +18,14 @@
   "discordpresence.survey.progress": "第 %s / %s 个问题",
   "discordpresence.survey.unavailable": "反馈功能暂时不可用。",
 
+  "discordpresence.survey.q.nps": "你有多大可能把这款游戏推荐给朋友？（0 = 完全不会，10 = 非常愿意）",
+  "discordpresence.survey.q.bug_report": "这局遇到 bug 了吗？",
+  "discordpresence.survey.q.bug_report.option.0": "列车消失",
+  "discordpresence.survey.q.bug_report.option.1": "卡顿",
+  "discordpresence.survey.q.bug_report.option.2": "其他",
+  "discordpresence.survey.q.bug_report.option.3": "没有",
+  "discordpresence.survey.q.change_one_thing": "如果能改动这个模组的一件事，你想改什么？",
+
   "discordpresence.chattag.dev": "@开发者",
 
   "discordpresence.chatconnect.status_enabled": "在线功能当前已启用。",

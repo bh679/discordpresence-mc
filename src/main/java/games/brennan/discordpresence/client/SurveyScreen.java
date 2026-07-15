@@ -3,6 +3,7 @@ package games.brennan.discordpresence.client;
 import games.brennan.discordpresence.network.DPNetwork;
 import games.brennan.discordpresence.network.SurveyQuestionPayload;
 import games.brennan.discordpresence.network.SurveySubmitPayload;
+import games.brennan.discordpresence.survey.SurveyKeys;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -53,13 +54,28 @@ public final class SurveyScreen extends Screen {
         return questions.get(index);
     }
 
+    /**
+     * The prompt as a localized component: resolves the question's derived translation key
+     * ({@link SurveyKeys#promptKey}) for the client's language, falling back to the literal prompt
+     * (which also drives the Discord embed, unchanged). Shared by the layout line-count and the draw
+     * so the two can never disagree on wrapping.
+     */
+    private static Component promptComponent(SurveyQuestionPayload.Entry q) {
+        return Component.translatableWithFallback(SurveyKeys.promptKey(q.id()), q.prompt());
+    }
+
+    /** The {@code i}-th choice label, localized via {@link SurveyKeys#optionKey} with a literal fallback. */
+    private static Component optionComponent(SurveyQuestionPayload.Entry q, int i) {
+        return Component.translatableWithFallback(SurveyKeys.optionKey(q.id(), i), q.options().get(i));
+    }
+
     @Override
     protected void init() {
         SurveyQuestionPayload.Entry q = current();
         int centerX = this.width / 2;
         int left = centerX - CONTENT_WIDTH / 2;
 
-        int promptLines = this.font.split(Component.literal(q.prompt()), CONTENT_WIDTH).size();
+        int promptLines = this.font.split(promptComponent(q), CONTENT_WIDTH).size();
         int promptBottom = promptTop() + promptLines * (this.font.lineHeight + 2);
 
         boolean isChoice = !q.options().isEmpty();
@@ -75,7 +91,7 @@ public final class SurveyScreen extends Screen {
             for (int i = 0; i < count; i++) {
                 int value = q.scaleMin() + i; // scaleMin is 0 for choices → value is the chosen index
                 int by = optY + i * (SCORE_H + SCORE_GAP);
-                Button b = Button.builder(Component.literal(options.get(i)), btn -> selectScore(value))
+                Button b = Button.builder(optionComponent(q, i), btn -> selectScore(value))
                         .bounds(left, by, CONTENT_WIDTH, SCORE_H)
                         .build();
                 scoreButtons[i] = b;
@@ -206,7 +222,7 @@ public final class SurveyScreen extends Screen {
         }
 
         // Wrapped question prompt, centered above the score row (drawn last → crisp).
-        List<FormattedCharSequence> lines = this.font.split(Component.literal(current().prompt()), CONTENT_WIDTH);
+        List<FormattedCharSequence> lines = this.font.split(promptComponent(current()), CONTENT_WIDTH);
         int ly = promptTop();
         for (FormattedCharSequence line : lines) {
             graphics.drawCenteredString(this.font, line, this.width / 2, ly, 0xFFFFFF);
