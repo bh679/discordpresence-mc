@@ -18,6 +18,14 @@
   "discordpresence.survey.progress": "Question %s of %s",
   "discordpresence.survey.unavailable": "Feedback isn't available right now.",
 
+  "discordpresence.survey.q.nps": "How likely are you to recommend this game to a friend? (0 = not at all, 10 = extremely)",
+  "discordpresence.survey.q.bug_report": "Did you face any bugs in this run?",
+  "discordpresence.survey.q.bug_report.option.0": "Train Vanished",
+  "discordpresence.survey.q.bug_report.option.1": "Lag",
+  "discordpresence.survey.q.bug_report.option.2": "Other",
+  "discordpresence.survey.q.bug_report.option.3": "No",
+  "discordpresence.survey.q.change_one_thing": "If you could change one thing about the mod, what would it be?",
+
   "discordpresence.chattag.dev": "@dev",
 
   "discordpresence.chatconnect.status_enabled": "Online features are currently enabled.",
