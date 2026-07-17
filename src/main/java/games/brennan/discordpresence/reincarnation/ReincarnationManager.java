@@ -158,10 +158,12 @@ public final class ReincarnationManager {
         int storeCarriage = carriage != null ? carriage : s.noCarriage();
         Integer carriageParam = (carriage != null && carriage == s.noCarriage()) ? null : carriage;
         cache.observe(owner, storeCarriage);
-        RelayReincarnationClient.fetch(base, carriageParam, INBOUND_RADIUS, owner.toString(), INBOUND_LIMIT)
-                .whenComplete((records, err) -> {
-                    List<Object> built = records == null ? List.of() : buildRecords(s, records);
-                    cache.store(owner, storeCarriage, built, System.currentTimeMillis());
+        // A forced fetch always pulls a full band (etag null) so the operator sees the actual records.
+        RelayReincarnationClient.fetch(base, carriageParam, INBOUND_RADIUS, owner.toString(), INBOUND_LIMIT, null)
+                .whenComplete((result, err) -> {
+                    List<Object> built = (err != null || result == null) ? List.of() : buildRecords(s, result.records());
+                    String etag = result == null ? null : result.etag();
+                    cache.store(owner, storeCarriage, built, etag, System.currentTimeMillis());
                     if (reply != null) {
                         reply.accept("fetched " + built.size() + " remote life(ies) for carriage "
                                 + (carriage != null ? carriage : "any"));
@@ -306,12 +308,22 @@ public final class ReincarnationManager {
                 continue;
             }
             Integer carriageParam = carriage == s.noCarriage() ? null : carriage;
-            RelayReincarnationClient.fetch(base, carriageParam, INBOUND_RADIUS, owner.toString(), INBOUND_LIMIT)
-                    .whenComplete((records, err) -> {
+            // Send the tag of the band we already hold: an unchanged band comes back with no snapshots.
+            String etag = cache.etagFor(owner);
+            RelayReincarnationClient.fetch(base, carriageParam, INBOUND_RADIUS, owner.toString(), INBOUND_LIMIT, etag)
+                    .whenComplete((result, err) -> {
                         try {
-                            List<Object> built = records == null ? List.of() : buildRecords(s, records);
-                            // Store even an empty band so the cooldown applies (don't re-poll every tick).
-                            cache.store(owner, carriage, built, System.currentTimeMillis());
+                            if (err == null && result != null && result.unchanged()) {
+                                // Band unchanged (conditional-GET hit) — keep the decoded records, just restart
+                                // the cooldown so we don't re-poll every tick. No snapshots were re-shipped.
+                                cache.touch(owner, System.currentTimeMillis());
+                            } else {
+                                List<Object> built = (err != null || result == null) ? List.of()
+                                        : buildRecords(s, result.records());
+                                String newEtag = result == null ? null : result.etag();
+                                // Store even an empty band so the cooldown applies (don't re-poll every tick).
+                                cache.store(owner, carriage, built, newEtag, System.currentTimeMillis());
+                            }
                         } catch (Exception ex) {
                             LOGGER.debug("Discord Presence: reincarnation inbound store failed: {}", ex.toString());
                         } finally {

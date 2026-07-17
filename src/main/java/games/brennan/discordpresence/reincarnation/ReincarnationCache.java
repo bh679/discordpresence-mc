@@ -25,8 +25,12 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 final class ReincarnationCache {
 
-    /** A fetched band for one owner: the carriage it was fetched around, when, and the built records. */
-    private record CachedBand(int carriage, List<Object> records, long fetchedAt) {}
+    /**
+     * A fetched band for one owner: the carriage it was fetched around, when, the built records, and the
+     * relay's {@code etag} tagging that record set — sent back on the next fetch so an unchanged band can
+     * be confirmed without re-shipping the snapshots.
+     */
+    private record CachedBand(int carriage, List<Object> records, long fetchedAt, String etag) {}
 
     /** owner → latest carriage observed from a {@code candidates()} call (drives prefetch). */
     private final ConcurrentHashMap<UUID, Integer> observed = new ConcurrentHashMap<>();
@@ -101,12 +105,37 @@ final class ReincarnationCache {
         }
     }
 
-    /** Atomically replace {@code owner}'s cached band with an immutable copy of {@code records}. */
-    void store(UUID owner, int carriage, List<Object> records, long now) {
+    /** Atomically replace {@code owner}'s cached band with an immutable copy of {@code records} + its {@code etag}. */
+    void store(UUID owner, int carriage, List<Object> records, String etag, long now) {
         if (owner == null) {
             return;
         }
-        bands.put(owner, new CachedBand(carriage, List.copyOf(records), now));
+        bands.put(owner, new CachedBand(carriage, List.copyOf(records), now, etag));
+    }
+
+    /**
+     * Refresh {@code owner}'s cached band's fetch time WITHOUT changing its records — the conditional-GET
+     * "unchanged" path, where the relay confirmed the band the caller already holds is still current. Its
+     * cooldown restarts (so it isn't re-fetched every tick) while its already-decoded records are reused,
+     * and no snapshots are re-shipped. No-op when there is no cached band to touch.
+     */
+    void touch(UUID owner, long now) {
+        if (owner == null) {
+            return;
+        }
+        bands.computeIfPresent(owner, (k, b) -> new CachedBand(b.carriage(), b.records(), now, b.etag()));
+    }
+
+    /**
+     * The {@code etag} of {@code owner}'s cached band, or {@code null} when none is cached — sent on the
+     * next fetch as the conditional-GET tag so the relay can answer "unchanged".
+     */
+    String etagFor(UUID owner) {
+        if (owner == null) {
+            return null;
+        }
+        CachedBand band = bands.get(owner);
+        return band == null ? null : band.etag();
     }
 
     /** Number of owners with a cached band (diagnostic). */

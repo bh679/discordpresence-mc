@@ -8,6 +8,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -56,9 +57,32 @@ class ReincarnationCacheTest {
         assertTrue(cache.candidatesFor(owner).isEmpty()); // nothing cached yet
         assertTrue(cache.candidatesFor(null).isEmpty());
 
-        cache.store(owner, 5, List.of("life-a", "life-b"), 1_000);
+        cache.store(owner, 5, List.of("life-a", "life-b"), "1.2", 1_000);
         assertEquals(List.of("life-a", "life-b"), cache.candidatesFor(owner));
         assertTrue(cache.candidatesFor(UUID.randomUUID()).isEmpty()); // unknown owner
+    }
+
+    // --- conditional-GET etag + touch -------------------------------------
+
+    @Test
+    void etagIsStoredAndTouchKeepsRecordsWhileRestartingCooldown() {
+        ReincarnationCache cache = new ReincarnationCache();
+        UUID owner = UUID.randomUUID();
+        assertNull(cache.etagFor(owner)); // nothing cached → no tag to send
+        cache.observe(owner, 5);
+        cache.store(owner, 5, List.of("life-a", "life-b"), "1.2", 1_000);
+        assertEquals("1.2", cache.etagFor(owner), "the band's etag is remembered for the next fetch");
+
+        // The band is now stale (cooldown elapsed) → it would be re-fetched.
+        assertTrue(cache.bandsToFetch(1_000 + COOLDOWN, COOLDOWN, DRIFT).containsKey(owner));
+        // An "unchanged" reply touches it: records + etag preserved, cooldown restarted → no longer stale.
+        cache.touch(owner, 1_000 + COOLDOWN);
+        assertEquals(List.of("life-a", "life-b"), cache.candidatesFor(owner), "records reused on unchanged");
+        assertEquals("1.2", cache.etagFor(owner), "etag preserved across a touch");
+        assertFalse(cache.bandsToFetch(1_000 + COOLDOWN + 5, COOLDOWN, DRIFT).containsKey(owner),
+                "touch restarts the cooldown so the unchanged band isn't re-polled every tick");
+
+        cache.touch(UUID.randomUUID(), 2_000); // touch on an unknown owner is a no-op (must not throw/create)
     }
 
     @Test
@@ -69,7 +93,7 @@ class ReincarnationCacheTest {
 
         cache.observe(cold, 3);
         cache.observe(fresh, 8);
-        cache.store(fresh, 8, List.of("x"), 10_000); // fresh has a current band
+        cache.store(fresh, 8, List.of("x"), "e1", 10_000); // fresh has a current band
 
         Map<UUID, Integer> toFetch = cache.bandsToFetch(11_000, COOLDOWN, DRIFT);
         assertTrue(toFetch.containsKey(cold)); // cold band → fetch
@@ -96,7 +120,7 @@ class ReincarnationCacheTest {
         ReincarnationCache cache = new ReincarnationCache();
         UUID owner = UUID.randomUUID();
         cache.observe(owner, 1);
-        cache.store(owner, 1, List.of("y"), 1_000);
+        cache.store(owner, 1, List.of("y"), "e", 1_000);
         cache.clear();
         assertTrue(cache.candidatesFor(owner).isEmpty());
         assertTrue(cache.bandsToFetch(1_000, COOLDOWN, DRIFT).isEmpty());
