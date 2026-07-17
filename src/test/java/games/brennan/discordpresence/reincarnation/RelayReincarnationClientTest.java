@@ -2,6 +2,7 @@ package games.brennan.discordpresence.reincarnation;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import games.brennan.discordpresence.reincarnation.RelayReincarnationClient.FetchResult;
 import games.brennan.discordpresence.reincarnation.RelayReincarnationClient.PostPayload;
 import games.brennan.discordpresence.reincarnation.RelayReincarnationClient.RelayRecord;
 import org.junit.jupiter.api.Test;
@@ -109,5 +110,46 @@ class RelayReincarnationClientTest {
         assertTrue(RelayReincarnationClient.parseRecords("{}").isEmpty());
         assertTrue(RelayReincarnationClient.parseRecords("").isEmpty());
         assertTrue(RelayReincarnationClient.parseRecords("not json").isEmpty()); // tolerant of garbage
+    }
+
+    // --- conditional GET (band etag) ---------------------------------------
+
+    @Test
+    void queryUrlIncludesEncodedEtagWhenPresent() {
+        String url = RelayReincarnationClient.buildQueryUrl(BASE, 12, 30, null, 5, "1.2.3");
+        assertEquals(BASE + "/reincarnations?radius=30&limit=5&carriage=12&etag=1.2.3", url);
+    }
+
+    @Test
+    void queryUrlOmitsEtagWhenBlankOrNull() {
+        assertFalse(RelayReincarnationClient.buildQueryUrl(BASE, null, 30, null, 5, null).contains("etag"));
+        assertFalse(RelayReincarnationClient.buildQueryUrl(BASE, null, 30, null, 5, "").contains("etag"));
+    }
+
+    @Test
+    void parseResponseFullBandCarriesRecordsAndEtag() {
+        String json = "{\"etag\":\"1.2\",\"unchanged\":false,\"records\":["
+                + "{\"id\":1,\"playerId\":\"p1\",\"snapshot\":\"SNAP1\"}]}";
+        FetchResult r = RelayReincarnationClient.parseResponse(json);
+        assertFalse(r.unchanged());
+        assertEquals("1.2", r.etag());
+        assertEquals(1, r.records().size());
+        assertEquals("SNAP1", r.records().get(0).snapshot());
+    }
+
+    @Test
+    void parseResponseUnchangedHasNoRecords() {
+        FetchResult r = RelayReincarnationClient.parseResponse("{\"unchanged\":true,\"etag\":\"1.2\"}");
+        assertTrue(r.unchanged());
+        assertEquals("1.2", r.etag());
+        assertTrue(r.records().isEmpty(), "an unchanged reply ships no records");
+    }
+
+    @Test
+    void parseResponseGarbageIsNotUnchangedWithNoRecords() {
+        FetchResult r = RelayReincarnationClient.parseResponse("not json");
+        assertFalse(r.unchanged());
+        assertNull(r.etag());
+        assertTrue(r.records().isEmpty());
     }
 }

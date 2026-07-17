@@ -44,6 +44,14 @@ final class RelayReincarnationClient {
     record RelayRecord(String id, String playerId, String name, Integer carriage,
                        String skinUrl, String snapshot, List<String> friends) {}
 
+    /**
+     * The outcome of a candidate query. Either the relay shipped a fresh band ({@code unchanged=false},
+     * {@code records} oldest→newest, {@code etag} tagging it for the next conditional fetch) or answered
+     * the conditional GET with "still current" ({@code unchanged=true}, no {@code records}) — the caller
+     * then keeps its cached band and skips re-decoding, saving the snapshot bytes the relay didn't send.
+     */
+    record FetchResult(boolean unchanged, String etag, List<RelayRecord> records) {}
+
     // --- pure builders / parser (unit-tested) --------------------------------
 
     /** Build the JSON ingest body. {@code snapshot} is required; blank/absent optional fields are omitted. */
@@ -76,12 +84,19 @@ final class RelayReincarnationClient {
         return o.toString();
     }
 
-    /**
-     * Build the candidate-query URL: {@code <base>/reincarnations?radius=&limit=&carriage=&exclude=}.
-     * {@code carriage} null ⇒ omitted ("any" band); {@code exclude} null/blank ⇒ omitted. {@code exclude}
-     * is URL-encoded (a player UUID).
-     */
+    /** Back-compat overload with no conditional-GET tag (always a full band). */
     static String buildQueryUrl(String base, Integer carriage, int radius, String exclude, int limit) {
+        return buildQueryUrl(base, carriage, radius, exclude, limit, null);
+    }
+
+    /**
+     * Build the candidate-query URL:
+     * {@code <base>/reincarnations?radius=&limit=&carriage=&exclude=&etag=}. {@code carriage} null ⇒
+     * omitted ("any" band); {@code exclude} null/blank ⇒ omitted ({@code exclude} is a URL-encoded player
+     * UUID). {@code etag} null/blank ⇒ omitted; when present it is the tag of the band the caller already
+     * holds, so the relay can answer "unchanged" and skip re-shipping the snapshots.
+     */
+    static String buildQueryUrl(String base, Integer carriage, int radius, String exclude, int limit, String etag) {
         StringBuilder sb = new StringBuilder(base).append(PATH)
                 .append("?radius=").append(radius)
                 .append("&limit=").append(limit);
@@ -90,6 +105,9 @@ final class RelayReincarnationClient {
         }
         if (exclude != null && !exclude.isBlank()) {
             sb.append("&exclude=").append(URLEncoder.encode(exclude, StandardCharsets.UTF_8));
+        }
+        if (etag != null && !etag.isBlank()) {
+            sb.append("&etag=").append(URLEncoder.encode(etag, StandardCharsets.UTF_8));
         }
         return sb.toString();
     }
@@ -130,6 +148,33 @@ final class RelayReincarnationClient {
             LOGGER.debug("Discord Presence: unparseable reincarnation records: {}", e.toString());
         }
         return out;
+    }
+
+    /**
+     * Parse a candidate-query response into a {@link FetchResult}. A {@code {"unchanged":true}} reply
+     * (conditional-GET hit) carries no records; otherwise {@code records} is the band (oldest→newest) and
+     * {@code etag} tags it for the next conditional fetch. Tolerant of missing fields / unparseable input
+     * (→ a not-unchanged result with whatever records parsed, and a null etag).
+     */
+    static FetchResult parseResponse(String json) {
+        boolean unchanged = false;
+        String etag = null;
+        if (json != null && !json.isBlank()) {
+            try {
+                JsonElement root = JsonParser.parseString(json);
+                if (root.isJsonObject()) {
+                    JsonObject o = root.getAsJsonObject();
+                    JsonElement u = o.get("unchanged");
+                    unchanged = u != null && u.isJsonPrimitive() && u.getAsBoolean();
+                    etag = optString(o, "etag");
+                }
+            } catch (RuntimeException e) {
+                LOGGER.debug("Discord Presence: unparseable reincarnation response: {}", e.toString());
+            }
+        }
+        // An "unchanged" reply ships no records; only parse the array when the relay actually sent a band.
+        List<RelayRecord> records = unchanged ? List.of() : parseRecords(json);
+        return new FetchResult(unchanged, etag, records);
     }
 
     private static String optString(JsonObject o, String key) {
@@ -200,38 +245,41 @@ final class RelayReincarnationClient {
     }
 
     /**
-     * Fetch candidates for a band. Resolves to the parsed records (oldest→newest), or an empty list on
-     * any failure (logged at DEBUG). Never blocks the caller — the HTTP runs on the shared async client.
+     * Fetch candidates for a band, sending {@code etag} (the tag of the band the caller already holds, or
+     * {@code null}) so the relay can answer the conditional GET with "unchanged" instead of re-shipping
+     * the snapshots. Resolves to a {@link FetchResult}; any failure (bad URL, non-200, unparseable, send
+     * error) resolves to a not-unchanged result with no records — the caller then treats it as an empty
+     * band, exactly as before. Never blocks — the HTTP runs on the shared async client.
      */
-    static CompletableFuture<List<RelayRecord>> fetch(String base, Integer carriage, int radius,
-                                                      String exclude, int limit) {
+    static CompletableFuture<FetchResult> fetch(String base, Integer carriage, int radius,
+                                                String exclude, int limit, String etag) {
         HttpRequest req;
         try {
-            req = HttpRequest.newBuilder(URI.create(buildQueryUrl(base, carriage, radius, exclude, limit)))
+            req = HttpRequest.newBuilder(URI.create(buildQueryUrl(base, carriage, radius, exclude, limit, etag)))
                     .timeout(DiscordHttp.TIMEOUT)
                     .header("User-Agent", "DiscordPresence")
                     .GET()
                     .build();
         } catch (Exception e) {
             LOGGER.debug("Discord Presence: bad reincarnation GET URL ({}): {}", base, e.toString());
-            return CompletableFuture.completedFuture(List.of());
+            return CompletableFuture.completedFuture(new FetchResult(false, null, List.of()));
         }
         return DiscordHttp.CLIENT.sendAsync(req, HttpResponse.BodyHandlers.ofString())
                 .thenApply(resp -> {
                     if (resp.statusCode() != 200) {
                         LOGGER.debug("Discord Presence: reincarnation GET -> {}", resp.statusCode());
-                        return List.<RelayRecord>of();
+                        return new FetchResult(false, null, List.<RelayRecord>of());
                     }
                     try {
-                        return parseRecords(resp.body());
+                        return parseResponse(resp.body());
                     } catch (Exception e) {
                         LOGGER.debug("Discord Presence: unparseable reincarnation response: {}", e.toString());
-                        return List.<RelayRecord>of();
+                        return new FetchResult(false, null, List.<RelayRecord>of());
                     }
                 })
                 .exceptionally(e -> {
                     LOGGER.debug("Discord Presence: reincarnation GET failed: {}", e.toString());
-                    return List.of();
+                    return new FetchResult(false, null, List.of());
                 });
     }
 }
