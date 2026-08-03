@@ -133,6 +133,20 @@ public interface DiscordCredentialsProvider {
     }
 
     /**
+     * Per-player veto on the game→Discord chat relay. Returning {@code false} stops that player's chat
+     * lines — including ones carrying a {@link #gameRelayMentions()} trigger — from reaching Discord at
+     * all. Consulted on the server thread for every relayed line, so keep it cheap.
+     *
+     * <p>The existing gates ask whether the SERVER may talk to Discord; this asks whether a particular
+     * player should. Dungeon Train uses it for Kid mode, where a child must not be able to open a
+     * channel to an adult stranger even though the server itself is online and they consented to
+     * network use. Defaults to {@code true} — every player relays, exactly as before.</p>
+     */
+    default boolean relayGameChatFor(UUID playerId) {
+        return true;
+    }
+
+    /**
      * Discord user ids whose online presence DP should track for the "last seen online" query seam
      * ({@code DiscordService.lastSeenOnline} / {@code isDiscordUserOnline}). Unioned with the admin's
      * {@code presenceTrackUserIds} config. A non-empty result makes DP request the privileged

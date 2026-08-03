@@ -182,6 +182,27 @@ public final class DiscordCredentials {
         }
     }
 
+    /**
+     * Whether the provider permits relaying {@code playerId}'s chat to Discord. {@code true} when no
+     * provider is registered — the default is "relay", so absent bundler opinion changes nothing.
+     * A throwing provider also yields {@code true}: a broken seam must not silently sever chat relay
+     * for everyone, and the seam's own contract is a narrowing one that a bundler opts into.
+     */
+    public static boolean providerRelayGameChatFor(UUID playerId) {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return true;
+        }
+        try {
+            return current.relayGameChatFor(playerId);
+        } catch (Throwable t) {
+            if (WARNED.compareAndSet(false, true)) {
+                LOGGER.warn("DiscordCredentialsProvider threw; ignoring its value (this warning is logged once).", t);
+            }
+            return true;
+        }
+    }
+
     /** The provider's presence-track user ids, or an empty list when none is registered / it fails. */
     public static List<String> providerPresenceTrackUserIds() {
         DiscordCredentialsProvider current = provider;
