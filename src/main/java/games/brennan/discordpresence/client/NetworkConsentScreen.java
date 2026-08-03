@@ -89,6 +89,11 @@ public final class NetworkConsentScreen extends Screen {
     private static final int COLOR_DOT = 0xFF6FB1FF;
     private static final int COLOR_FOOTNOTE = 0xFF808080;
     private static final int COLOR_NEG = 0xFFFF5555;    // red ✗ marker for "won't do" lines (text stays grey)
+    // Selected-option fill + border. Vanilla Button has no "selected" state, and greying the chosen one
+    // reads as UNAVAILABLE rather than chosen — it inverts the meaning, making the other button look
+    // picked. So the selection is drawn instead, in the card's own accent blue.
+    private static final int COLOR_SELECTED_BG = 0xFF3A4A63;
+    private static final int COLOR_SELECTED_BORDER = COLOR_DOT;
 
     private final Screen previousScreen;
 
@@ -303,14 +308,11 @@ public final class NetworkConsentScreen extends Screen {
             int totalGaps = BUTTON_GAP * (count - 1);
             int optionW = (innerWidth - totalGaps) / count;
             for (int i = 0; i < count; i++) {
-                final int index = i;
                 // Last button absorbs the rounding remainder so the row ends flush with the card.
                 int w = (i == count - 1) ? innerWidth - (optionW + BUTTON_GAP) * i : optionW;
-                Button option = addRenderableWidget(
-                        Button.builder(Component.literal(choice.options().get(i)), b -> onOptionPicked(index))
-                                .bounds(innerLeft + (optionW + BUTTON_GAP) * i, cursor, w, BUTTON_H)
-                                .build());
-                option.active = i != choiceIndex;
+                addRenderableWidget(new OptionButton(
+                        innerLeft + (optionW + BUTTON_GAP) * i, cursor, w, BUTTON_H,
+                        Component.literal(choice.options().get(i)), i));
             }
             cursor += BUTTON_H;
         }
@@ -474,5 +476,43 @@ public final class NetworkConsentScreen extends Screen {
     @Override
     public void onClose() {
         answer(Consent.DENIED);
+    }
+
+    /**
+     * One button in the provider question's option row, which paints itself when it is the selected
+     * one instead of relying on a vanilla state.
+     *
+     * <p>Vanilla {@link Button} has no "selected" appearance. The obvious substitute — deactivating the
+     * chosen one — is actively misleading here: a greyed button reads as UNAVAILABLE, so the OTHER
+     * button ends up looking like the selection. Instead both stay live and the selected one is drawn
+     * flat in the card's accent blue, which matches how the rest of this card is drawn anyway.</p>
+     */
+    private final class OptionButton extends Button {
+
+        private final int index;
+
+        private OptionButton(int x, int y, int width, int height, Component label, int index) {
+            super(x, y, width, height, label, b -> onOptionPicked(index), DEFAULT_NARRATION);
+            this.index = index;
+        }
+
+        @Override
+        protected void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+            if (index != choiceIndex) {
+                super.renderWidget(graphics, mouseX, mouseY, partialTick);
+                return;
+            }
+            int x0 = getX();
+            int y0 = getY();
+            int x1 = x0 + getWidth();
+            int y1 = y0 + getHeight();
+            graphics.fill(x0, y0, x1, y1, COLOR_SELECTED_BG);
+            graphics.fill(x0, y0, x1, y0 + 1, COLOR_SELECTED_BORDER);
+            graphics.fill(x0, y1 - 1, x1, y1, COLOR_SELECTED_BORDER);
+            graphics.fill(x0, y0, x0 + 1, y1, COLOR_SELECTED_BORDER);
+            graphics.fill(x1 - 1, y0, x1, y1, COLOR_SELECTED_BORDER);
+            graphics.drawCenteredString(font, getMessage(), x0 + getWidth() / 2,
+                    y0 + (getHeight() - font.lineHeight) / 2, COLOR_TITLE);
+        }
     }
 }
