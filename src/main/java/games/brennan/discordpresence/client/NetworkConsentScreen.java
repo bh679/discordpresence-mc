@@ -71,6 +71,13 @@ public final class NetworkConsentScreen extends Screen {
     private static final int GAP_FOOTNOTE = 12;
     private static final int GAP_NEG = 4;       // gap between positive bullets and the red "won't do" block
     private static final int GAP_CHOICE = 10;   // gap above the optional provider question's control
+    // With a provider question present, the footnote loses the GAP_BULLETS it normally sits under (the
+    // question block consumes it) and ends up flush against the option buttons. These restore the
+    // breathing room above it and tighten it below, so it reads as a note on the question rather than
+    // a caption on the confirm button. Both apply ONLY when a question rendered — without one the
+    // footnote keeps its original spacing exactly.
+    private static final int GAP_FOOTNOTE_ABOVE_CHOICE = 9;
+    private static final int GAP_FOOTNOTE_BELOW_CHOICE = 7;
 
     // Flat colours (no gradients).
     private static final int BACKDROP_DIM = 0x99000000;
@@ -228,6 +235,8 @@ public final class NetworkConsentScreen extends Screen {
 
         // Label line + the cycle button under it, when a question was supplied.
         int choiceH = choice == null ? 0 : GAP_CHOICE + font.lineHeight + 2 + BUTTON_H;
+        int footnoteAbove = choice == null ? 0 : GAP_FOOTNOTE_ABOVE_CHOICE;
+        int footnoteBelow = choice == null ? GAP_FOOTNOTE : GAP_FOOTNOTE_BELOW_CHOICE;
         int contentH = font.lineHeight + GAP_TITLE
                 + bodyLines.size() * LINE_STEP + GAP_BODY
                 + bulletsH
@@ -235,7 +244,8 @@ public final class NetworkConsentScreen extends Screen {
                 + suppliedH
                 + GAP_BULLETS
                 + choiceH
-                + footnoteLines.size() * LINE_STEP + GAP_FOOTNOTE
+                + footnoteAbove
+                + footnoteLines.size() * LINE_STEP + footnoteBelow
                 + BUTTON_H;
 
         panelW = CARD_W;
@@ -305,8 +315,9 @@ public final class NetworkConsentScreen extends Screen {
             cursor += BUTTON_H;
         }
 
+        cursor += footnoteAbove;
         footnoteY = cursor;
-        cursor += footnoteLines.size() * LINE_STEP + GAP_FOOTNOTE;
+        cursor += footnoteLines.size() * LINE_STEP + footnoteBelow;
 
         int buttonY = cursor;
         if (choice != null && choice.hasConfirmLabel()) {
