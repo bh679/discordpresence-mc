@@ -133,6 +133,17 @@ public interface DiscordCredentialsProvider {
     }
 
     /**
+     * Replacement for the consent card's grey footnote line. DP's own default names DP's own
+     * {@code /chatconnect} command, which is wrong for a bundler whose players reach the setting
+     * somewhere else. {@code null} (the default) keeps DP's wording.
+     *
+     * <p>Read on the physical client at title-screen time.</p>
+     */
+    default String networkConsentFootnote() {
+        return null;
+    }
+
+    /**
      * Per-player veto on the game→Discord chat relay. Returning {@code false} stops that player's chat
      * lines — including ones carrying a {@link #gameRelayMentions()} trigger — from reaching Discord at
      * all. Consulted on the server thread for every relayed line, so keep it cheap.

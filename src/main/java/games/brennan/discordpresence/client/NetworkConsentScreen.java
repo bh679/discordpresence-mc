@@ -8,7 +8,6 @@ import games.brennan.discordpresence.config.DiscordPresenceClientConfig;
 import games.brennan.discordpresence.config.DiscordPresenceClientConfig.Consent;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
@@ -17,7 +16,6 @@ import org.slf4j.Logger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.IntConsumer;
-import java.util.stream.IntStream;
 
 /**
  * The one-time network-access confirmation, shown on the title screen the first time consent is
@@ -193,7 +191,12 @@ public final class NetworkConsentScreen extends Screen {
             nonBulletBlocks = negBlocks;
         }
 
-        footnoteLines = font.split(Component.translatable(KEY_FOOTNOTE), innerWidth);
+        // DP's own footnote names DP's /chatconnect command, which is wrong for a bundler whose players
+        // change the setting somewhere else — so a provider may replace the line wholesale.
+        String providerFootnote = DiscordCredentials.providerNetworkConsentFootnote();
+        footnoteLines = font.split(
+                providerFootnote != null ? Component.literal(providerFootnote) : Component.translatable(KEY_FOOTNOTE),
+                innerWidth);
 
         // Sum content heights + gaps to size the panel, then centre it.
         int bulletsH = 0;
@@ -281,12 +284,24 @@ public final class NetworkConsentScreen extends Screen {
             cursor += GAP_CHOICE;
             choiceLabelY = cursor;
             cursor += font.lineHeight + 2;
-            addRenderableWidget(CycleButton.<Integer>builder(i -> Component.literal(choice.options().get(i)))
-                    .withValues(IntStream.range(0, choice.options().size()).boxed().toList())
-                    .withInitialValue(choiceIndex)
-                    .displayOnlyValue()
-                    .create(innerLeft, cursor, innerWidth, BUTTON_H,
-                            Component.literal(choice.label()), (b, v) -> onOptionPicked(v)));
+            // One button PER OPTION, side by side, rather than a cycle button. A cycle button shows
+            // only the current value, so the player cannot see what else is on offer without clicking
+            // it — on a card answered exactly once, that hides half the decision. The SELECTED option's
+            // button is deactivated: greyed and unclickable is how vanilla already reads "this is the
+            // current one", and it makes the remaining button the only thing to press.
+            int count = choice.options().size();
+            int totalGaps = BUTTON_GAP * (count - 1);
+            int optionW = (innerWidth - totalGaps) / count;
+            for (int i = 0; i < count; i++) {
+                final int index = i;
+                // Last button absorbs the rounding remainder so the row ends flush with the card.
+                int w = (i == count - 1) ? innerWidth - (optionW + BUTTON_GAP) * i : optionW;
+                Button option = addRenderableWidget(
+                        Button.builder(Component.literal(choice.options().get(i)), b -> onOptionPicked(index))
+                                .bounds(innerLeft + (optionW + BUTTON_GAP) * i, cursor, w, BUTTON_H)
+                                .build());
+                option.active = i != choiceIndex;
+            }
             cursor += BUTTON_H;
         }
 
@@ -317,10 +332,11 @@ public final class NetworkConsentScreen extends Screen {
      * than patched. {@link #init} preserves {@link #choiceIndex} across the rebuild.
      */
     private void onOptionPicked(int index) {
+        if (index == choiceIndex) return;
         choiceIndex = index;
-        if (choice != null && choice.bulletsFor(index) != null) {
-            rebuildWidgets();
-        }
+        // Always rebuild: even with no per-option bullets, the option buttons themselves have to swap
+        // which one is deactivated, and that is decided during init().
+        rebuildWidgets();
     }
 
     /** Persist the choice and return to whatever screen we opened over (the title screen). */

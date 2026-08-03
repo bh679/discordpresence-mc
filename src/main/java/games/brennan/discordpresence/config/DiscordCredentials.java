@@ -203,6 +203,26 @@ public final class DiscordCredentials {
         }
     }
 
+    /**
+     * The provider's replacement consent-card footnote, or {@code null} to keep DP's own wording.
+     * Read on the client at title-screen time by {@code NetworkConsentScreen}.
+     */
+    public static String providerNetworkConsentFootnote() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return null;
+        }
+        try {
+            String value = current.networkConsentFootnote();
+            return value == null || value.isBlank() ? null : value;
+        } catch (Throwable t) {
+            if (WARNED.compareAndSet(false, true)) {
+                LOGGER.warn("DiscordCredentialsProvider threw; ignoring its value (this warning is logged once).", t);
+            }
+            return null;
+        }
+    }
+
     /** The provider's presence-track user ids, or an empty list when none is registered / it fails. */
     public static List<String> providerPresenceTrackUserIds() {
         DiscordCredentialsProvider current = provider;
