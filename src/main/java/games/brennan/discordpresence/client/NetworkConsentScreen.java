@@ -1,6 +1,7 @@
 package games.brennan.discordpresence.client;
 
 import com.mojang.logging.LogUtils;
+import games.brennan.discordpresence.config.ConsentBullet;
 import games.brennan.discordpresence.config.ConsentChoice;
 import games.brennan.discordpresence.config.DiscordCredentials;
 import games.brennan.discordpresence.config.DiscordPresenceClientConfig;
@@ -30,12 +31,16 @@ import java.util.stream.IntStream;
  * screen we came from; Esc / {@link #onClose()} behaves like "Not now" so the prompt is answered
  * (DENIED) rather than re-shown. Client-only — never class-loaded on a dedicated server.</p>
  *
- * <p>A bundling mod may also add ONE extra question here via
- * {@link DiscordCredentials#providerNetworkConsentChoice()} (see {@link ConsentChoice}) — this card is
- * the one screen every player answers exactly once, so a second one-time question costs no extra
- * interruption. It renders between the footnote and the buttons, and is reported on every exit path
- * including Esc, because it is a preference rather than a consent gate. No choice supplied ⇒ the
- * layout is byte-identical to before.</p>
+ * <p>A bundling mod may customise the card through
+ * {@link DiscordCredentials#providerNetworkConsentChoice()} (see {@link ConsentChoice}): it adds one
+ * extra question, and may additionally replace the bullet list with a per-option one
+ * ({@link ConsentChoice#optionBullets()}) and collapse the two buttons into a single confirming one
+ * ({@link ConsentChoice#confirmLabel()}). Supply nothing and the card lays out exactly as it always
+ * did, so standalone DP and other bundlers are unaffected.</p>
+ *
+ * <p><b>Note on {@code confirmLabel}.</b> A single confirming button leaves Esc as the only way to
+ * decline, which means the refusal still exists but is invisible. That is a deliberate choice for the
+ * bundler to make and own — DP neither prevents it nor does it by default.</p>
  */
 public final class NetworkConsentScreen extends Screen {
 
@@ -98,13 +103,30 @@ public final class NetworkConsentScreen extends Screen {
     private int nonBulletsY;
     private int footnoteY;
 
-    /** The bundling mod's optional extra question, or {@code null} when there is none. */
+    /** The bundling mod's optional customisation, or {@code null} when there is none. */
     private ConsentChoice choice;
     /** Which option of {@link #choice} is currently selected; meaningless when {@code choice} is null. */
     private int choiceIndex;
     /** Set once {@link #choice}'s answer has been reported, so no exit path can report it twice. */
     private boolean choiceReported;
     private int choiceLabelY;
+
+    /**
+     * One laid-out provider bullet: its wrapped lines, its marker, its hover text, and the screen rect
+     * the hover is tested against. Rebuilt whenever the selected option changes, because a different
+     * option can wrap to a different number of lines and therefore shift everything below it.
+     */
+    private record LaidOutBullet(List<FormattedCharSequence> lines, boolean on, String tooltip,
+                                 int x, int y, int w, int h) {
+        boolean hasTooltipText() {
+            return tooltip != null && !tooltip.isBlank();
+        }
+    }
+
+    /** Per-option bullets for the CURRENT selection; empty when the provider supplied none. */
+    private List<LaidOutBullet> optionBullets = List.of();
+    /** The option {@link #optionBullets} was laid out for, so render can notice a toggle and re-init. */
+    private int optionBulletsFor = -1;
 
     public NetworkConsentScreen(Screen previousScreen) {
         super(Component.translatable(KEY_TITLE)); // narration title
@@ -119,43 +141,59 @@ public final class NetworkConsentScreen extends Screen {
         // Wrap each text section to the card's inner width.
         bodyLines = font.split(Component.translatable(KEY_BODY), innerWidth);
 
-        // Provider-fed feature bullets are host content (raw Strings → literal); the standalone-DP
-        // fallback is the one translatable bullet.
-        List<String> providerFeatures = DiscordCredentials.providerNetworkConsentFeatures();
-        List<Component> features;
-        if (providerFeatures == null || providerFeatures.isEmpty()) {
-            features = List.of(Component.translatable(KEY_FEATURE_FALLBACK));
+        // Optional customisation from the bundling mod (Dungeon Train's Adult / Kid content mode).
+        // Absent ⇒ every measurement below adds zero and the card is laid out byte-identically to
+        // before, which is what keeps standalone DP and other bundlers untouched. Preserve a selection
+        // already made this showing, so a toggle-driven re-init doesn't snap back to the default.
+        ConsentChoice previous = choice;
+        choice = DiscordCredentials.providerNetworkConsentChoice();
+        if (choice == null) {
+            choiceIndex = 0;
+        } else if (previous == null) {
+            choiceIndex = choice.safeDefaultIndex();
+            choiceReported = false;
         } else {
-            features = new ArrayList<>(providerFeatures.size());
-            for (String feature : providerFeatures) {
-                features.add(Component.literal(feature));
-            }
+            choiceIndex = Math.max(0, Math.min(choiceIndex, choice.options().size() - 1));
         }
-        List<List<FormattedCharSequence>> blocks = new ArrayList<>(features.size());
-        for (Component feature : features) {
-            blocks.add(font.split(feature, bulletTextWidth));
-        }
-        bulletBlocks = blocks;
 
-        // Optional "won't do" lines, rendered with a red ✗ below the positive bullets. Empty = no
-        // section, so the layout below stays identical to before when the bundler supplies none.
-        List<String> nonFeatures = DiscordCredentials.providerNetworkConsentNonFeatures();
-        List<List<FormattedCharSequence>> negBlocks = new ArrayList<>(nonFeatures == null ? 0 : nonFeatures.size());
-        if (nonFeatures != null) {
-            for (String nonFeature : nonFeatures) {
-                negBlocks.add(font.split(Component.literal(nonFeature), bulletTextWidth));
+        // The provider's own bullets for the selected option, when it supplies them, replace BOTH of
+        // the card's blocks below — that is how one line's marker and wording can differ per option.
+        List<ConsentBullet> supplied = choice == null ? null : choice.bulletsFor(choiceIndex);
+        if (supplied != null) {
+            bulletBlocks = List.of();
+            nonBulletBlocks = List.of();
+        } else {
+            // Provider-fed feature bullets are host content (raw Strings → literal); the standalone-DP
+            // fallback is the one translatable bullet.
+            List<String> providerFeatures = DiscordCredentials.providerNetworkConsentFeatures();
+            List<Component> features;
+            if (providerFeatures == null || providerFeatures.isEmpty()) {
+                features = List.of(Component.translatable(KEY_FEATURE_FALLBACK));
+            } else {
+                features = new ArrayList<>(providerFeatures.size());
+                for (String feature : providerFeatures) {
+                    features.add(Component.literal(feature));
+                }
             }
+            List<List<FormattedCharSequence>> blocks = new ArrayList<>(features.size());
+            for (Component feature : features) {
+                blocks.add(font.split(feature, bulletTextWidth));
+            }
+            bulletBlocks = blocks;
+
+            // Optional "won't do" lines, rendered with a red ✗ below the positive bullets. Empty = no
+            // section, so the layout below stays identical to before when the bundler supplies none.
+            List<String> nonFeatures = DiscordCredentials.providerNetworkConsentNonFeatures();
+            List<List<FormattedCharSequence>> negBlocks = new ArrayList<>(nonFeatures == null ? 0 : nonFeatures.size());
+            if (nonFeatures != null) {
+                for (String nonFeature : nonFeatures) {
+                    negBlocks.add(font.split(Component.literal(nonFeature), bulletTextWidth));
+                }
+            }
+            nonBulletBlocks = negBlocks;
         }
-        nonBulletBlocks = negBlocks;
 
         footnoteLines = font.split(Component.translatable(KEY_FOOTNOTE), innerWidth);
-
-        // Optional extra question from the bundling mod (Dungeon Train's Adult / Kid content mode).
-        // Absent ⇒ every measurement below adds zero and the card is laid out byte-identically to
-        // before, which is what keeps standalone DP and other bundlers untouched.
-        choice = DiscordCredentials.providerNetworkConsentChoice();
-        choiceIndex = choice == null ? 0 : choice.safeDefaultIndex();
-        choiceReported = false;
 
         // Sum content heights + gaps to size the panel, then centre it.
         int bulletsH = 0;
@@ -172,15 +210,29 @@ public final class NetworkConsentScreen extends Screen {
         if (!nonBulletBlocks.isEmpty()) {
             nonBulletsH -= BULLET_GAP; // no trailing gap after the last "won't do" line
         }
+        // Provider bullets are measured from the SAME wrap the render uses, so a long line that wraps
+        // to three rows grows the card instead of overflowing it.
+        List<List<FormattedCharSequence>> suppliedWrapped = new ArrayList<>();
+        int suppliedH = 0;
+        if (supplied != null) {
+            for (ConsentBullet bullet : supplied) {
+                List<FormattedCharSequence> lines = font.split(Component.literal(bullet.text()), bulletTextWidth);
+                suppliedWrapped.add(lines);
+                suppliedH += lines.size() * LINE_STEP + BULLET_GAP;
+            }
+            if (!suppliedWrapped.isEmpty()) suppliedH -= BULLET_GAP;
+        }
+
         // Label line + the cycle button under it, when a question was supplied.
         int choiceH = choice == null ? 0 : GAP_CHOICE + font.lineHeight + 2 + BUTTON_H;
         int contentH = font.lineHeight + GAP_TITLE
                 + bodyLines.size() * LINE_STEP + GAP_BODY
                 + bulletsH
                 + (nonBulletBlocks.isEmpty() ? 0 : GAP_NEG + nonBulletsH)
+                + suppliedH
                 + GAP_BULLETS
-                + footnoteLines.size() * LINE_STEP + GAP_FOOTNOTE
                 + choiceH
+                + footnoteLines.size() * LINE_STEP + GAP_FOOTNOTE
                 + BUTTON_H;
 
         panelW = CARD_W;
@@ -202,14 +254,29 @@ public final class NetworkConsentScreen extends Screen {
             nonBulletsY = cursor;
             cursor += nonBulletsH;
         }
-        cursor += GAP_BULLETS;
-        footnoteY = cursor;
-        cursor += footnoteLines.size() * LINE_STEP + GAP_FOOTNOTE;
 
+        // Provider bullets occupy the same slot the card's own blocks would have; only one or the
+        // other is ever non-empty. Rects are captured here so render() can hit-test hovers.
         int innerLeft = panelX + PAD;
+        List<LaidOutBullet> laid = new ArrayList<>();
+        if (supplied != null) {
+            for (int i = 0; i < supplied.size(); i++) {
+                ConsentBullet bullet = supplied.get(i);
+                List<FormattedCharSequence> lines = suppliedWrapped.get(i);
+                int h = lines.size() * LINE_STEP;
+                laid.add(new LaidOutBullet(lines, bullet.on(), bullet.tooltip(),
+                        innerLeft, cursor, innerWidth, h));
+                cursor += h + BULLET_GAP;
+            }
+            if (!laid.isEmpty()) cursor -= BULLET_GAP;
+        }
+        optionBullets = List.copyOf(laid);
+        optionBulletsFor = choiceIndex;
 
-        // The provider's question sits between the footnote and the buttons: after the explanation of
-        // what the connection does, and immediately above the answer buttons that also commit it.
+        cursor += GAP_BULLETS;
+
+        // The provider's question sits between the bullets and the footnote: after what the connection
+        // does, and above the answer button that also commits it.
         if (choice != null) {
             cursor += GAP_CHOICE;
             choiceLabelY = cursor;
@@ -219,19 +286,41 @@ public final class NetworkConsentScreen extends Screen {
                     .withInitialValue(choiceIndex)
                     .displayOnlyValue()
                     .create(innerLeft, cursor, innerWidth, BUTTON_H,
-                            Component.literal(choice.label()), (b, v) -> choiceIndex = v));
+                            Component.literal(choice.label()), (b, v) -> onOptionPicked(v)));
             cursor += BUTTON_H;
         }
 
-        // Two buttons in a row at the card bottom.
-        int buttonW = (innerWidth - BUTTON_GAP) / 2;
+        footnoteY = cursor;
+        cursor += footnoteLines.size() * LINE_STEP + GAP_FOOTNOTE;
+
         int buttonY = cursor;
-        addRenderableWidget(Button.builder(Component.translatable(KEY_ENABLE), b -> answer(Consent.GRANTED))
-                .bounds(innerLeft, buttonY, buttonW, BUTTON_H)
-                .build());
-        addRenderableWidget(Button.builder(Component.translatable(KEY_NOT_NOW), b -> answer(Consent.DENIED))
-                .bounds(innerLeft + buttonW + BUTTON_GAP, buttonY, innerWidth - buttonW - BUTTON_GAP, BUTTON_H)
-                .build());
+        if (choice != null && choice.hasConfirmLabel()) {
+            // Single confirming button. Esc stays the only decline — see the class note.
+            addRenderableWidget(Button.builder(Component.literal(choice.confirmLabel()), b -> answer(Consent.GRANTED))
+                    .bounds(innerLeft, buttonY, innerWidth, BUTTON_H)
+                    .build());
+        } else {
+            // Two buttons in a row at the card bottom.
+            int buttonW = (innerWidth - BUTTON_GAP) / 2;
+            addRenderableWidget(Button.builder(Component.translatable(KEY_ENABLE), b -> answer(Consent.GRANTED))
+                    .bounds(innerLeft, buttonY, buttonW, BUTTON_H)
+                    .build());
+            addRenderableWidget(Button.builder(Component.translatable(KEY_NOT_NOW), b -> answer(Consent.DENIED))
+                    .bounds(innerLeft + buttonW + BUTTON_GAP, buttonY, innerWidth - buttonW - BUTTON_GAP, BUTTON_H)
+                    .build());
+        }
+    }
+
+    /**
+     * The player picked a different option. When the provider supplies per-option bullets the whole
+     * card can change height — different lines, different wrapping — so the layout is rebuilt rather
+     * than patched. {@link #init} preserves {@link #choiceIndex} across the rebuild.
+     */
+    private void onOptionPicked(int index) {
+        choiceIndex = index;
+        if (choice != null && choice.bulletsFor(index) != null) {
+            rebuildWidgets();
+        }
     }
 
     /** Persist the choice and return to whatever screen we opened over (the title screen). */
@@ -243,9 +332,9 @@ public final class NetworkConsentScreen extends Screen {
 
     /**
      * Hand the bundling mod its answer, exactly once. Called from {@link #answer} so it covers every
-     * exit path — "Enable", "Not now", and Esc alike: the extra question is not itself a consent gate,
-     * so declining the connection (or dismissing the card) must still answer it rather than leaving
-     * the provider with nothing. DP stores nothing; the provider owns persistence.
+     * exit path — every button and Esc alike: the extra question is not itself a consent gate, so
+     * declining the connection (or dismissing the card) must still answer it rather than leaving the
+     * provider with nothing. DP stores nothing; the provider owns persistence.
      */
     private void reportChoice() {
         if (choice == null || choiceReported) return;
@@ -309,6 +398,29 @@ public final class NetworkConsentScreen extends Screen {
             ny += BULLET_GAP;
         }
 
+        // Provider per-option bullets. Same two markers as above, but chosen per LINE rather than per
+        // block, so one line can be on under one option and off under another.
+        String hovered = null;
+        for (LaidOutBullet bullet : optionBullets) {
+            int ly = bullet.y();
+            if (bullet.on()) {
+                int dotY = ly + (font.lineHeight - 3) / 2;
+                graphics.fill(innerLeft + DOT_INSET, dotY, innerLeft + DOT_INSET + 3, dotY + 3, COLOR_DOT);
+            } else {
+                graphics.drawString(font, Component.literal("✗"), innerLeft + DOT_INSET - 1, ly, COLOR_NEG, false);
+            }
+            for (FormattedCharSequence line : bullet.lines()) {
+                graphics.drawString(font, line, innerLeft + BULLET_TEXT_INSET, ly, COLOR_BULLET, false);
+                ly += LINE_STEP;
+            }
+            // These are drawn strings, not widgets, so the hover is a manual hit-test against the rect
+            // captured at layout time. Resolved here and rendered last, so the tooltip sits above
+            // everything else on the card.
+            if (bullet.hasTooltipText() && contains(bullet, mouseX, mouseY)) {
+                hovered = bullet.tooltip();
+            }
+        }
+
         int fy = footnoteY;
         for (FormattedCharSequence line : footnoteLines) {
             graphics.drawCenteredString(font, line, centerX, fy, COLOR_FOOTNOTE);
@@ -319,6 +431,16 @@ public final class NetworkConsentScreen extends Screen {
         if (choice != null) {
             graphics.drawString(font, Component.literal(choice.label()), innerLeft, choiceLabelY, COLOR_BODY, false);
         }
+
+        if (hovered != null) {
+            graphics.renderTooltip(font, font.split(Component.literal(hovered), 200), mouseX, mouseY);
+        }
+    }
+
+    /** Whether {@code (mx, my)} falls inside a laid-out bullet's row. */
+    private static boolean contains(LaidOutBullet bullet, int mx, int my) {
+        return mx >= bullet.x() && mx < bullet.x() + bullet.w()
+                && my >= bullet.y() && my < bullet.y() + bullet.h();
     }
 
     /** Esc behaves like "Not now": record DENIED so the prompt is answered, not re-shown. */
