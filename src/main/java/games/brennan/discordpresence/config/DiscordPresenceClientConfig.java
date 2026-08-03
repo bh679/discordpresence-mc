@@ -26,6 +26,12 @@ public final class DiscordPresenceClientConfig {
 
     public static final ModConfigSpec SPEC;
     public static final ModConfigSpec.EnumValue<Consent> NETWORK_CONSENT;
+    /**
+     * The consent-card version this client last answered — see
+     * {@link DiscordCredentialsProvider#networkConsentVersion()}. Below the bundler's current version
+     * means the card is due again, the way a terms-of-service bump re-asks.
+     */
+    public static final ModConfigSpec.IntValue CONSENT_VERSION;
     public static final ModConfigSpec.ConfigValue<List<? extends String>> CHAT_TAG_SUGGESTIONS;
 
     static {
@@ -37,6 +43,13 @@ public final class DiscordPresenceClientConfig {
                          "network features in singleplayer/LAN; DENIED keeps them off. Change it anytime",
                          "here, or in-game with /chatconnect on|off (works even when cheats are off).")
                 .defineEnum("networkConsent", Consent.UNSET);
+        CONSENT_VERSION = b
+                .comment("Which version of the consent card this client last answered. The bundling mod",
+                         "raises its own version when what it asks for materially changes; until this",
+                         "catches up, the card is shown again on the title screen. Answering it — either",
+                         "way — brings this to the current version, so a decline is remembered rather",
+                         "than re-asked every launch.")
+                .defineInRange("consentVersion", 0, 0, Integer.MAX_VALUE);
         b.pop();
         b.push("chat");
         CHAT_TAG_SUGGESTIONS = b
@@ -71,6 +84,33 @@ public final class DiscordPresenceClientConfig {
     }
 
     /** Persist the player's choice from the title-screen confirmation. No-op if not loaded. */
+    /** The consent-card version this client last answered; 0 when it never has. */
+    public static int getConsentVersion() {
+        return isLoaded() ? CONSENT_VERSION.get() : 0;
+    }
+
+    /**
+     * Whether the card is due: never answered, or answered against an older version than the bundler
+     * now asks for. {@code requiredVersion} ≤ 0 means the bundler doesn't do re-consent, in which case
+     * only the never-answered case shows it — exactly the original behaviour.
+     */
+    public static boolean isConsentDue(int requiredVersion) {
+        if (isUnset()) return true;
+        return requiredVersion > 0 && getConsentVersion() < requiredVersion;
+    }
+
+    /**
+     * Record that this client answered the card for {@code version}. Called from the card alongside
+     * {@link #setConsent}, on EVERY exit path, so a player who declines is not re-asked every launch —
+     * they have answered this version, and the next bump asks again.
+     */
+    public static void setConsentVersion(int version) {
+        if (!isLoaded() || version <= 0) return;
+        if (CONSENT_VERSION.get() >= version) return;
+        CONSENT_VERSION.set(version);
+        CONSENT_VERSION.save();
+    }
+
     public static void setConsent(Consent consent) {
         if (isLoaded()) {
             NETWORK_CONSENT.set(consent);

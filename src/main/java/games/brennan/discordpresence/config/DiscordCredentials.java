@@ -223,6 +223,25 @@ public final class DiscordCredentials {
         }
     }
 
+    /**
+     * The provider's current consent-card version, or {@code 0} when none is registered / it fails —
+     * {@code 0} disables re-consent, so a broken provider can never nag every launch.
+     */
+    public static int providerNetworkConsentVersion() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return 0;
+        }
+        try {
+            return Math.max(0, current.networkConsentVersion());
+        } catch (Throwable t) {
+            if (WARNED.compareAndSet(false, true)) {
+                LOGGER.warn("DiscordCredentialsProvider threw; ignoring its value (this warning is logged once).", t);
+            }
+            return 0;
+        }
+    }
+
     /** The provider's presence-track user ids, or an empty list when none is registered / it fails. */
     public static List<String> providerPresenceTrackUserIds() {
         DiscordCredentialsProvider current = provider;

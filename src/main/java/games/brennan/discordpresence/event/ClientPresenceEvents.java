@@ -2,6 +2,7 @@ package games.brennan.discordpresence.event;
 
 import games.brennan.discordpresence.DiscordPresence;
 import games.brennan.discordpresence.client.NetworkConsentScreen;
+import games.brennan.discordpresence.config.DiscordCredentials;
 import games.brennan.discordpresence.config.DiscordPresenceClientConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
@@ -35,7 +36,11 @@ public final class ClientPresenceEvents {
         if (!(event.getScreen() instanceof TitleScreen)) {
             return;
         }
-        if (promptedThisLaunch || !DiscordPresenceClientConfig.isUnset()) {
+        // Due = never answered, OR answered against an older consent version than the bundling mod now
+        // asks for (see DiscordCredentialsProvider#networkConsentVersion) — the terms-of-service style
+        // re-ask. Still at most once per launch either way.
+        if (promptedThisLaunch
+                || !DiscordPresenceClientConfig.isConsentDue(DiscordCredentials.providerNetworkConsentVersion())) {
             return;
         }
         promptedThisLaunch = true;

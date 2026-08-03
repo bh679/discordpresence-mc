@@ -144,6 +144,22 @@ public interface DiscordCredentialsProvider {
     }
 
     /**
+     * The current version of what this card asks for. Raise it — in a release, deliberately — when the
+     * answer a player already gave no longer covers what the mod now does, and every client that has
+     * not answered THIS version sees the card once more, the way a terms-of-service bump re-asks.
+     *
+     * <p>Baked into the jar on purpose: a player is re-asked when they update, not when a server or a
+     * remote config decides so. Answering (either way) records the version, so a decline is remembered
+     * rather than re-asked every launch.</p>
+     *
+     * <p>{@code 0} (the default) means no re-consent: the card shows only when it has never been
+     * answered, exactly as before.</p>
+     */
+    default int networkConsentVersion() {
+        return 0;
+    }
+
+    /**
      * Per-player veto on the game→Discord chat relay. Returning {@code false} stops that player's chat
      * lines — including ones carrying a {@link #gameRelayMentions()} trigger — from reaching Discord at
      * all. Consulted on the server thread for every relayed line, so keep it cheap.

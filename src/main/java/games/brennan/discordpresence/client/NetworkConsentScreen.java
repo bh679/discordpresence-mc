@@ -355,6 +355,9 @@ public final class NetworkConsentScreen extends Screen {
     /** Persist the choice and return to whatever screen we opened over (the title screen). */
     private void answer(Consent consent) {
         reportChoice();
+        // Stamp the version on EVERY exit path, including Esc. A player who declines has answered this
+        // version; re-asking them next launch would be nagging, not consent.
+        DiscordPresenceClientConfig.setConsentVersion(DiscordCredentials.providerNetworkConsentVersion());
         DiscordPresenceClientConfig.setConsent(consent);
         this.minecraft.setScreen(previousScreen);
     }
