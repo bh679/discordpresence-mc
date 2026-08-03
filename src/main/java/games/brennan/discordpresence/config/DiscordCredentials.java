@@ -161,6 +161,27 @@ public final class DiscordCredentials {
         }
     }
 
+    /**
+     * The provider's optional extra consent-card question, or {@code null} when none is registered /
+     * it fails / the provider supplied one with nothing to ask. Read on the client at title-screen
+     * time by {@code NetworkConsentScreen}.
+     */
+    public static ConsentChoice providerNetworkConsentChoice() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return null;
+        }
+        try {
+            ConsentChoice value = current.networkConsentChoice();
+            return value != null && value.isRenderable() ? value : null;
+        } catch (Throwable t) {
+            if (WARNED.compareAndSet(false, true)) {
+                LOGGER.warn("DiscordCredentialsProvider threw; ignoring its value (this warning is logged once).", t);
+            }
+            return null;
+        }
+    }
+
     /** The provider's presence-track user ids, or an empty list when none is registered / it fails. */
     public static List<String> providerPresenceTrackUserIds() {
         DiscordCredentialsProvider current = provider;

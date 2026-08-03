@@ -1,16 +1,22 @@
 package games.brennan.discordpresence.client;
 
+import com.mojang.logging.LogUtils;
+import games.brennan.discordpresence.config.ConsentChoice;
 import games.brennan.discordpresence.config.DiscordCredentials;
 import games.brennan.discordpresence.config.DiscordPresenceClientConfig;
 import games.brennan.discordpresence.config.DiscordPresenceClientConfig.Consent;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
+import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.IntConsumer;
+import java.util.stream.IntStream;
 
 /**
  * The one-time network-access confirmation, shown on the title screen the first time consent is
@@ -23,8 +29,17 @@ import java.util.List;
  * <p>Either button records the answer in {@link DiscordPresenceClientConfig} and returns to the
  * screen we came from; Esc / {@link #onClose()} behaves like "Not now" so the prompt is answered
  * (DENIED) rather than re-shown. Client-only — never class-loaded on a dedicated server.</p>
+ *
+ * <p>A bundling mod may also add ONE extra question here via
+ * {@link DiscordCredentials#providerNetworkConsentChoice()} (see {@link ConsentChoice}) — this card is
+ * the one screen every player answers exactly once, so a second one-time question costs no extra
+ * interruption. It renders between the footnote and the buttons, and is reported on every exit path
+ * including Esc, because it is a preference rather than a consent gate. No choice supplied ⇒ the
+ * layout is byte-identical to before.</p>
  */
 public final class NetworkConsentScreen extends Screen {
+
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     // Localisable text keys (English defaults live in assets/discordpresence/lang/en_us.json). The
     // feature bullets come from the bundling mod as raw Strings; only the standalone-DP fallback
@@ -52,6 +67,7 @@ public final class NetworkConsentScreen extends Screen {
     private static final int GAP_BULLETS = 10;
     private static final int GAP_FOOTNOTE = 12;
     private static final int GAP_NEG = 4;       // gap between positive bullets and the red "won't do" block
+    private static final int GAP_CHOICE = 10;   // gap above the optional provider question's control
 
     // Flat colours (no gradients).
     private static final int BACKDROP_DIM = 0x99000000;
@@ -81,6 +97,14 @@ public final class NetworkConsentScreen extends Screen {
     private int bulletsY;
     private int nonBulletsY;
     private int footnoteY;
+
+    /** The bundling mod's optional extra question, or {@code null} when there is none. */
+    private ConsentChoice choice;
+    /** Which option of {@link #choice} is currently selected; meaningless when {@code choice} is null. */
+    private int choiceIndex;
+    /** Set once {@link #choice}'s answer has been reported, so no exit path can report it twice. */
+    private boolean choiceReported;
+    private int choiceLabelY;
 
     public NetworkConsentScreen(Screen previousScreen) {
         super(Component.translatable(KEY_TITLE)); // narration title
@@ -126,6 +150,13 @@ public final class NetworkConsentScreen extends Screen {
 
         footnoteLines = font.split(Component.translatable(KEY_FOOTNOTE), innerWidth);
 
+        // Optional extra question from the bundling mod (Dungeon Train's Adult / Kid content mode).
+        // Absent ⇒ every measurement below adds zero and the card is laid out byte-identically to
+        // before, which is what keeps standalone DP and other bundlers untouched.
+        choice = DiscordCredentials.providerNetworkConsentChoice();
+        choiceIndex = choice == null ? 0 : choice.safeDefaultIndex();
+        choiceReported = false;
+
         // Sum content heights + gaps to size the panel, then centre it.
         int bulletsH = 0;
         for (List<FormattedCharSequence> block : bulletBlocks) {
@@ -141,12 +172,15 @@ public final class NetworkConsentScreen extends Screen {
         if (!nonBulletBlocks.isEmpty()) {
             nonBulletsH -= BULLET_GAP; // no trailing gap after the last "won't do" line
         }
+        // Label line + the cycle button under it, when a question was supplied.
+        int choiceH = choice == null ? 0 : GAP_CHOICE + font.lineHeight + 2 + BUTTON_H;
         int contentH = font.lineHeight + GAP_TITLE
                 + bodyLines.size() * LINE_STEP + GAP_BODY
                 + bulletsH
                 + (nonBulletBlocks.isEmpty() ? 0 : GAP_NEG + nonBulletsH)
                 + GAP_BULLETS
                 + footnoteLines.size() * LINE_STEP + GAP_FOOTNOTE
+                + choiceH
                 + BUTTON_H;
 
         panelW = CARD_W;
@@ -172,8 +206,24 @@ public final class NetworkConsentScreen extends Screen {
         footnoteY = cursor;
         cursor += footnoteLines.size() * LINE_STEP + GAP_FOOTNOTE;
 
-        // Two buttons in a row at the card bottom.
         int innerLeft = panelX + PAD;
+
+        // The provider's question sits between the footnote and the buttons: after the explanation of
+        // what the connection does, and immediately above the answer buttons that also commit it.
+        if (choice != null) {
+            cursor += GAP_CHOICE;
+            choiceLabelY = cursor;
+            cursor += font.lineHeight + 2;
+            addRenderableWidget(CycleButton.<Integer>builder(i -> Component.literal(choice.options().get(i)))
+                    .withValues(IntStream.range(0, choice.options().size()).boxed().toList())
+                    .withInitialValue(choiceIndex)
+                    .displayOnlyValue()
+                    .create(innerLeft, cursor, innerWidth, BUTTON_H,
+                            Component.literal(choice.label()), (b, v) -> choiceIndex = v));
+            cursor += BUTTON_H;
+        }
+
+        // Two buttons in a row at the card bottom.
         int buttonW = (innerWidth - BUTTON_GAP) / 2;
         int buttonY = cursor;
         addRenderableWidget(Button.builder(Component.translatable(KEY_ENABLE), b -> answer(Consent.GRANTED))
@@ -186,8 +236,28 @@ public final class NetworkConsentScreen extends Screen {
 
     /** Persist the choice and return to whatever screen we opened over (the title screen). */
     private void answer(Consent consent) {
+        reportChoice();
         DiscordPresenceClientConfig.setConsent(consent);
         this.minecraft.setScreen(previousScreen);
+    }
+
+    /**
+     * Hand the bundling mod its answer, exactly once. Called from {@link #answer} so it covers every
+     * exit path — "Enable", "Not now", and Esc alike: the extra question is not itself a consent gate,
+     * so declining the connection (or dismissing the card) must still answer it rather than leaving
+     * the provider with nothing. DP stores nothing; the provider owns persistence.
+     */
+    private void reportChoice() {
+        if (choice == null || choiceReported) return;
+        choiceReported = true;
+        IntConsumer sink = choice.onChosen();
+        if (sink == null) return;
+        try {
+            sink.accept(choiceIndex);
+        } catch (Throwable t) {
+            // A misbehaving bundler must not trap the player on the consent card.
+            LOGGER.warn("Consent-choice listener threw; the answer was dropped.", t);
+        }
     }
 
     @Override
@@ -243,6 +313,11 @@ public final class NetworkConsentScreen extends Screen {
         for (FormattedCharSequence line : footnoteLines) {
             graphics.drawCenteredString(font, line, centerX, fy, COLOR_FOOTNOTE);
             fy += LINE_STEP;
+        }
+
+        // The provider question's label. Its CycleButton is a widget, so super.render() already drew it.
+        if (choice != null) {
+            graphics.drawString(font, Component.literal(choice.label()), innerLeft, choiceLabelY, COLOR_BODY, false);
         }
     }
 

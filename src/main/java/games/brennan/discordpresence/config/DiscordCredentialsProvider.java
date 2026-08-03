@@ -121,6 +121,18 @@ public interface DiscordCredentialsProvider {
     }
 
     /**
+     * An optional extra question for the title-screen consent card — see {@link ConsentChoice}.
+     * Rendered as a labelled option control below the bullets, and answered on every exit path
+     * (either button, or Esc). {@code null} (the default) means no extra question and a card that
+     * lays out exactly as it did before, so standalone DP and other bundlers are unaffected.
+     *
+     * <p>Read on the physical client at title-screen time, once per showing.</p>
+     */
+    default ConsentChoice networkConsentChoice() {
+        return null;
+    }
+
+    /**
      * Discord user ids whose online presence DP should track for the "last seen online" query seam
      * ({@code DiscordService.lastSeenOnline} / {@code isDiscordUserOnline}). Unioned with the admin's
      * {@code presenceTrackUserIds} config. A non-empty result makes DP request the privileged
