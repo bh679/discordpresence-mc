@@ -456,6 +456,12 @@ public final class DiscordService {
             return;
         }
         UUID uuid = player.getUUID();
+        // Per-player veto from the bundling mod (Dungeon Train's Kid mode). Checked before the trigger
+        // parsing below on purpose: a vetoed player must not reach Discord even by tagging @dev, which
+        // is precisely the path the veto exists to close.
+        if (!DiscordCredentials.providerRelayGameChatFor(uuid)) {
+            return;
+        }
         String name = player.getGameProfile().getName();
 
         // Configured chat-tag triggers (e.g. @dev): rewrite to a real <@id> mention and collect the ids

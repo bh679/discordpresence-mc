@@ -121,6 +121,59 @@ public interface DiscordCredentialsProvider {
     }
 
     /**
+     * An optional extra question for the title-screen consent card — see {@link ConsentChoice}.
+     * Rendered as a labelled option control below the bullets, and answered on every exit path
+     * (either button, or Esc). {@code null} (the default) means no extra question and a card that
+     * lays out exactly as it did before, so standalone DP and other bundlers are unaffected.
+     *
+     * <p>Read on the physical client at title-screen time, once per showing.</p>
+     */
+    default ConsentChoice networkConsentChoice() {
+        return null;
+    }
+
+    /**
+     * Replacement for the consent card's grey footnote line. DP's own default names DP's own
+     * {@code /chatconnect} command, which is wrong for a bundler whose players reach the setting
+     * somewhere else. {@code null} (the default) keeps DP's wording.
+     *
+     * <p>Read on the physical client at title-screen time.</p>
+     */
+    default String networkConsentFootnote() {
+        return null;
+    }
+
+    /**
+     * The current version of what this card asks for. Raise it — in a release, deliberately — when the
+     * answer a player already gave no longer covers what the mod now does, and every client that has
+     * not answered THIS version sees the card once more, the way a terms-of-service bump re-asks.
+     *
+     * <p>Baked into the jar on purpose: a player is re-asked when they update, not when a server or a
+     * remote config decides so. Answering (either way) records the version, so a decline is remembered
+     * rather than re-asked every launch.</p>
+     *
+     * <p>{@code 0} (the default) means no re-consent: the card shows only when it has never been
+     * answered, exactly as before.</p>
+     */
+    default int networkConsentVersion() {
+        return 0;
+    }
+
+    /**
+     * Per-player veto on the game→Discord chat relay. Returning {@code false} stops that player's chat
+     * lines — including ones carrying a {@link #gameRelayMentions()} trigger — from reaching Discord at
+     * all. Consulted on the server thread for every relayed line, so keep it cheap.
+     *
+     * <p>The existing gates ask whether the SERVER may talk to Discord; this asks whether a particular
+     * player should. Dungeon Train uses it for Kid mode, where a child must not be able to open a
+     * channel to an adult stranger even though the server itself is online and they consented to
+     * network use. Defaults to {@code true} — every player relays, exactly as before.</p>
+     */
+    default boolean relayGameChatFor(UUID playerId) {
+        return true;
+    }
+
+    /**
      * Discord user ids whose online presence DP should track for the "last seen online" query seam
      * ({@code DiscordService.lastSeenOnline} / {@code isDiscordUserOnline}). Unioned with the admin's
      * {@code presenceTrackUserIds} config. A non-empty result makes DP request the privileged

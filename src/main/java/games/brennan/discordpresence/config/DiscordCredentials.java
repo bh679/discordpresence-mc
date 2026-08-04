@@ -161,6 +161,87 @@ public final class DiscordCredentials {
         }
     }
 
+    /**
+     * The provider's optional extra consent-card question, or {@code null} when none is registered /
+     * it fails / the provider supplied one with nothing to ask. Read on the client at title-screen
+     * time by {@code NetworkConsentScreen}.
+     */
+    public static ConsentChoice providerNetworkConsentChoice() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return null;
+        }
+        try {
+            ConsentChoice value = current.networkConsentChoice();
+            return value != null && value.isRenderable() ? value : null;
+        } catch (Throwable t) {
+            if (WARNED.compareAndSet(false, true)) {
+                LOGGER.warn("DiscordCredentialsProvider threw; ignoring its value (this warning is logged once).", t);
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Whether the provider permits relaying {@code playerId}'s chat to Discord. {@code true} when no
+     * provider is registered — the default is "relay", so absent bundler opinion changes nothing.
+     * A throwing provider also yields {@code true}: a broken seam must not silently sever chat relay
+     * for everyone, and the seam's own contract is a narrowing one that a bundler opts into.
+     */
+    public static boolean providerRelayGameChatFor(UUID playerId) {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return true;
+        }
+        try {
+            return current.relayGameChatFor(playerId);
+        } catch (Throwable t) {
+            if (WARNED.compareAndSet(false, true)) {
+                LOGGER.warn("DiscordCredentialsProvider threw; ignoring its value (this warning is logged once).", t);
+            }
+            return true;
+        }
+    }
+
+    /**
+     * The provider's replacement consent-card footnote, or {@code null} to keep DP's own wording.
+     * Read on the client at title-screen time by {@code NetworkConsentScreen}.
+     */
+    public static String providerNetworkConsentFootnote() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return null;
+        }
+        try {
+            String value = current.networkConsentFootnote();
+            return value == null || value.isBlank() ? null : value;
+        } catch (Throwable t) {
+            if (WARNED.compareAndSet(false, true)) {
+                LOGGER.warn("DiscordCredentialsProvider threw; ignoring its value (this warning is logged once).", t);
+            }
+            return null;
+        }
+    }
+
+    /**
+     * The provider's current consent-card version, or {@code 0} when none is registered / it fails —
+     * {@code 0} disables re-consent, so a broken provider can never nag every launch.
+     */
+    public static int providerNetworkConsentVersion() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return 0;
+        }
+        try {
+            return Math.max(0, current.networkConsentVersion());
+        } catch (Throwable t) {
+            if (WARNED.compareAndSet(false, true)) {
+                LOGGER.warn("DiscordCredentialsProvider threw; ignoring its value (this warning is logged once).", t);
+            }
+            return 0;
+        }
+    }
+
     /** The provider's presence-track user ids, or an empty list when none is registered / it fails. */
     public static List<String> providerPresenceTrackUserIds() {
         DiscordCredentialsProvider current = provider;
