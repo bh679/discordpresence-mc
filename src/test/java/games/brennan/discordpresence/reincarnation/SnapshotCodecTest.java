@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -26,6 +27,13 @@ class SnapshotCodecTest {
      */
     private static final byte[] BOTH_SPECIALS = {(byte) 0xFB, (byte) 0xF0, 0x00};
 
+    /**
+     * As {@link #BOTH_SPECIALS} but with the sextets swapped, so {@code _} (0x5f) is the <em>first</em>
+     * character the standard decoder chokes on — reproducing the reported failure verbatim:
+     * {@code IllegalArgumentException: Illegal base64 character 5f}.
+     */
+    private static final byte[] UNDERSCORE_FIRST = {(byte) 0xFF, (byte) 0xE0, 0x00};
+
     @Test
     void fixtureActuallyExercisesBothAlphabets() {
         String standard = Base64.getEncoder().encodeToString(BOTH_SPECIALS);
@@ -33,6 +41,18 @@ class SnapshotCodecTest {
         assertEquals("+/AA", standard);
         assertEquals("-_AA", urlSafe);
         assertTrue(urlSafe.indexOf('_') >= 0, "fixture must contain the 0x5f character from the bug report");
+    }
+
+    @Test
+    void decodesTheExactInputShapeFromTheBugReport() {
+        String urlSafe = Base64.getUrlEncoder().encodeToString(UNDERSCORE_FIRST);
+        assertEquals("_-AA", urlSafe);
+        assertEquals(0x5f, urlSafe.charAt(0), "the reported illegal character");
+
+        // What the shipped decoder does with it — the production failure, reproduced.
+        assertThrows(IllegalArgumentException.class, () -> Base64.getDecoder().decode(urlSafe));
+        // What this codec does with it now.
+        assertArrayEquals(UNDERSCORE_FIRST, SnapshotCodec.decodeBase64(urlSafe));
     }
 
     @Test
