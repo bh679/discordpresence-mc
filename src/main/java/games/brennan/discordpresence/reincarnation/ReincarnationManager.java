@@ -161,12 +161,16 @@ public final class ReincarnationManager {
         // A forced fetch always pulls a full band (etag null) so the operator sees the actual records.
         RelayReincarnationClient.fetch(base, carriageParam, INBOUND_RADIUS, owner.toString(), INBOUND_LIMIT, null)
                 .whenComplete((result, err) -> {
-                    List<Object> built = (err != null || result == null) ? List.of() : buildRecords(s, result.records());
+                    BuiltBand band = (err != null || result == null)
+                            ? new BuiltBand(List.of(), List.of()) : buildRecords(s, result.records());
                     String etag = result == null ? null : result.etag();
-                    cache.store(owner, storeCarriage, built, etag, System.currentTimeMillis());
+                    cache.store(owner, storeCarriage, band.records(), etag, System.currentTimeMillis());
                     if (reply != null) {
-                        reply.accept("fetched " + built.size() + " remote life(ies) for carriage "
-                                + (carriage != null ? carriage : "any"));
+                        // Report the drops too — a forced fetch that quietly under-counts is what hid this bug.
+                        String unusable = band.dropped().isEmpty() ? ""
+                                : " (" + band.dropped().size() + " unusable: " + String.join(", ", band.dropped()) + ")";
+                        reply.accept("fetched " + band.records().size() + " remote life(ies) for carriage "
+                                + (carriage != null ? carriage : "any") + unusable);
                     }
                 });
         return true;
@@ -318,11 +322,11 @@ public final class ReincarnationManager {
                                 // the cooldown so we don't re-poll every tick. No snapshots were re-shipped.
                                 cache.touch(owner, System.currentTimeMillis());
                             } else {
-                                List<Object> built = (err != null || result == null) ? List.of()
-                                        : buildRecords(s, result.records());
+                                BuiltBand band = (err != null || result == null)
+                                        ? new BuiltBand(List.of(), List.of()) : buildRecords(s, result.records());
                                 String newEtag = result == null ? null : result.etag();
                                 // Store even an empty band so the cooldown applies (don't re-poll every tick).
-                                cache.store(owner, carriage, built, newEtag, System.currentTimeMillis());
+                                cache.store(owner, carriage, band.records(), newEtag, System.currentTimeMillis());
                             }
                         } catch (Exception ex) {
                             LOGGER.debug("Discord Presence: reincarnation inbound store failed: {}", ex.toString());
@@ -333,20 +337,30 @@ public final class ReincarnationManager {
         }
     }
 
+    /**
+     * One band's worth of decoding: the lives that were built, plus the relay ids of the records that
+     * were <b>not</b> — a candidate the player will never meet. A drop is best-effort by design (a bad
+     * record must not break the band), but it is not free, so it is counted rather than swallowed.
+     */
+    record BuiltBand(List<Object> records, List<String> dropped) {}
+
     /** Decode each relay record and build a real seam record; drop any that fail to decode/build. */
-    private List<Object> buildRecords(PlayerMobSeam s, List<RelayRecord> records) {
+    private BuiltBand buildRecords(PlayerMobSeam s, List<RelayRecord> records) {
         List<Object> out = new ArrayList<>(records.size());
+        List<String> dropped = new ArrayList<>();
         for (RelayRecord r : records) {
-            CompoundTag snapshot = SnapshotCodec.decode(r.snapshot());
+            String id = r.id() != null ? r.id() : "";
+            CompoundTag snapshot = SnapshotCodec.decode(r.snapshot(), "record " + (id.isBlank() ? "?" : id));
             if (snapshot == null) {
+                dropped.add(id.isBlank() ? "?" : id);
                 continue;
             }
             UUID playerId = parseUuid(r.playerId());
             int carriage = r.carriage() != null ? r.carriage() : s.noCarriage();
-            List<CompoundTag> friends = SnapshotCodec.decodeAll(r.friends());
+            List<CompoundTag> friends = SnapshotCodec.decodeAll(r.friends(), "record " + (id.isBlank() ? "?" : id));
             ReincarnationRecordData dto = new ReincarnationRecordData(
                     DP_SOURCE_ID,
-                    r.id() != null ? r.id() : "",
+                    id,
                     playerId,
                     r.name() != null ? r.name() : "",
                     carriage,
@@ -356,9 +370,16 @@ public final class ReincarnationManager {
             Object built = s.buildRecord(dto);
             if (built != null) {
                 out.add(built);
+            } else {
+                dropped.add(id.isBlank() ? "?" : id);
             }
         }
-        return out;
+        if (!dropped.isEmpty()) {
+            // Name the ids: the per-record warning alone can't tell you WHICH pool entry to go and fix.
+            LOGGER.warn("Discord Presence: {} of {} remote life(ies) were unusable and dropped (relay record id(s): {})",
+                    dropped.size(), records.size(), String.join(", ", dropped));
+        }
+        return new BuiltBand(List.copyOf(out), List.copyOf(dropped));
     }
 
     /** A UUID from the relay's playerId string, or {@code null} when blank/invalid (an unattributed life). */
