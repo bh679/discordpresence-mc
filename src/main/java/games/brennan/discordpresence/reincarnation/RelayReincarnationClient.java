@@ -36,9 +36,19 @@ final class RelayReincarnationClient {
 
     private RelayReincarnationClient() {}
 
-    /** A death record to ingest. {@code carriage} null ⇒ omitted (the relay then excludes it from carriage bands). */
+    /**
+     * A death record to ingest. {@code carriage} null ⇒ omitted (the relay then excludes it from carriage
+     * bands); {@code difficulty} blank ⇒ omitted, and the relay files the record in its legacy partition.
+     */
     record PostPayload(String snapshot, String name, String playerId, Integer carriage,
-                       String skinUrl, List<String> friends) {}
+                       String skinUrl, List<String> friends, String difficulty) {
+
+        /** A record with no difficulty captured — the shape before the pool was partitioned. */
+        PostPayload(String snapshot, String name, String playerId, Integer carriage,
+                    String skinUrl, List<String> friends) {
+            this(snapshot, name, playerId, carriage, skinUrl, friends, "");
+        }
+    }
 
     /** A candidate returned by the relay (snapshot/friends still opaque strings; {@code carriage} may be null). */
     record RelayRecord(String id, String playerId, String name, Integer carriage,
@@ -70,6 +80,9 @@ final class RelayReincarnationClient {
         if (p.skinUrl() != null && !p.skinUrl().isBlank()) {
             o.addProperty("skinUrl", p.skinUrl());
         }
+        if (p.difficulty() != null && !p.difficulty().isBlank()) {
+            o.addProperty("difficulty", p.difficulty());
+        }
         if (p.friends() != null && !p.friends().isEmpty()) {
             JsonArray arr = new JsonArray();
             for (String f : p.friends()) {
@@ -86,17 +99,28 @@ final class RelayReincarnationClient {
 
     /** Back-compat overload with no conditional-GET tag (always a full band). */
     static String buildQueryUrl(String base, Integer carriage, int radius, String exclude, int limit) {
-        return buildQueryUrl(base, carriage, radius, exclude, limit, null);
+        return buildQueryUrl(base, carriage, radius, exclude, limit, null, null);
+    }
+
+    /** Back-compat overload with no difficulty partition (the whole pool). */
+    static String buildQueryUrl(String base, Integer carriage, int radius, String exclude, int limit, String etag) {
+        return buildQueryUrl(base, carriage, radius, exclude, limit, etag, null);
     }
 
     /**
      * Build the candidate-query URL:
-     * {@code <base>/reincarnations?radius=&limit=&carriage=&exclude=&etag=}. {@code carriage} null ⇒
-     * omitted ("any" band); {@code exclude} null/blank ⇒ omitted ({@code exclude} is a URL-encoded player
-     * UUID). {@code etag} null/blank ⇒ omitted; when present it is the tag of the band the caller already
-     * holds, so the relay can answer "unchanged" and skip re-shipping the snapshots.
+     * {@code <base>/reincarnations?radius=&limit=&carriage=&exclude=&etag=&difficulty=}. {@code carriage}
+     * null ⇒ omitted ("any" band); {@code exclude} null/blank ⇒ omitted ({@code exclude} is a URL-encoded
+     * player UUID). {@code etag} null/blank ⇒ omitted; when present it is the tag of the band the caller
+     * already holds, so the relay can answer "unchanged" and skip re-shipping the snapshots.
+     * {@code difficulty} null/blank ⇒ omitted, which asks for the unpartitioned pool.
+     *
+     * <p>Pushing the partition into the query rather than filtering the reply is the point: the relay
+     * returns only the newest {@code limit} of the band, so an unfiltered fetch could come back entirely
+     * full of other difficulties' lives and leave nothing eligible.</p>
      */
-    static String buildQueryUrl(String base, Integer carriage, int radius, String exclude, int limit, String etag) {
+    static String buildQueryUrl(String base, Integer carriage, int radius, String exclude, int limit,
+                                String etag, String difficulty) {
         StringBuilder sb = new StringBuilder(base).append(PATH)
                 .append("?radius=").append(radius)
                 .append("&limit=").append(limit);
@@ -108,6 +132,9 @@ final class RelayReincarnationClient {
         }
         if (etag != null && !etag.isBlank()) {
             sb.append("&etag=").append(URLEncoder.encode(etag, StandardCharsets.UTF_8));
+        }
+        if (difficulty != null && !difficulty.isBlank()) {
+            sb.append("&difficulty=").append(URLEncoder.encode(difficulty, StandardCharsets.UTF_8));
         }
         return sb.toString();
     }
@@ -253,9 +280,20 @@ final class RelayReincarnationClient {
      */
     static CompletableFuture<FetchResult> fetch(String base, Integer carriage, int radius,
                                                 String exclude, int limit, String etag) {
+        return fetch(base, carriage, radius, exclude, limit, etag, null);
+    }
+
+    /**
+     * As {@link #fetch(String, Integer, int, String, int, String)}, restricted to the {@code difficulty}
+     * partition ({@code null} = the whole pool). A relay that predates the partition ignores the parameter
+     * and returns the unfiltered band; PlayerMob filters locally as a backstop.
+     */
+    static CompletableFuture<FetchResult> fetch(String base, Integer carriage, int radius,
+                                                String exclude, int limit, String etag, String difficulty) {
         HttpRequest req;
         try {
-            req = HttpRequest.newBuilder(URI.create(buildQueryUrl(base, carriage, radius, exclude, limit, etag)))
+            req = HttpRequest.newBuilder(
+                    URI.create(buildQueryUrl(base, carriage, radius, exclude, limit, etag, difficulty)))
                     .timeout(DiscordHttp.TIMEOUT)
                     .header("User-Agent", "DiscordPresence")
                     .GET()

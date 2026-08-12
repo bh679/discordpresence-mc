@@ -89,6 +89,23 @@ class ReincarnationOutboxTest {
     }
 
     @Test
+    void difficultyPartitionSurvivesAReload(@TempDir Path dir) {
+        // The queue is durable, so a death waiting out an outage must keep the partition it was lived on —
+        // otherwise a restart would silently re-file it into the relay's legacy partition.
+        Path file = dir.resolve("discordpresence-reincarnation.json");
+        ReincarnationOutbox first = new ReincarnationOutbox();
+        first.load(file);
+        first.enqueue("death-hard", new PostPayload("SNAP", "Steve", "uuid-1", 7, "", List.of(), "hard"));
+        first.enqueue("death-old", new PostPayload("SNAP", "Steve", "uuid-1", 7, "", List.of()));
+
+        ReincarnationOutbox reloaded = new ReincarnationOutbox();
+        reloaded.load(file);
+        assertEquals("hard", reloaded.queued().get("death-hard").difficulty());
+        assertEquals("", reloaded.queued().get("death-old").difficulty(),
+                "an unknown difficulty stays unknown rather than becoming a partition");
+    }
+
+    @Test
     void carriageNullRoundTrips(@TempDir Path dir) {
         Path file = dir.resolve("discordpresence-reincarnation.json");
         ReincarnationOutbox first = new ReincarnationOutbox();
