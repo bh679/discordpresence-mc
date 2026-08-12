@@ -23,10 +23,19 @@ import java.util.UUID;
  * @param name            the player's display name at death
  * @param carriage        Dungeon-Train room index, or PlayerMob's {@code NO_CARRIAGE} sentinel
  * @param skinUrl         captured Mojang skin texture URL, or {@code ""}
+ * @param difficulty      the vanilla difficulty this life was lived on (its serialized name), or
+ *                        {@code ""} when unknown — the pool's partition key
  * @param snapshot        the opaque PlayerMob entity NBT to embody this life
  * @param friendSnapshots snapshots of the PlayerMobs that loved this player at death (may be empty)
  */
 public record ReincarnationRecordData(String sourceId, String key, UUID playerId, String name,
-                                      int carriage, String skinUrl, CompoundTag snapshot,
+                                      int carriage, String skinUrl, String difficulty, CompoundTag snapshot,
                                       List<CompoundTag> friendSnapshots) {
+
+    /** A record whose difficulty is unknown — the shape before the partition existed. */
+    public ReincarnationRecordData(String sourceId, String key, UUID playerId, String name,
+                                   int carriage, String skinUrl, CompoundTag snapshot,
+                                   List<CompoundTag> friendSnapshots) {
+        this(sourceId, key, playerId, name, carriage, skinUrl, "", snapshot, friendSnapshots);
+    }
 }

@@ -60,6 +60,28 @@ class RelayReincarnationClientTest {
         assertFalse(o.has("playerId"));
     }
 
+    @Test
+    void postBodyCarriesTheDifficultyPartitionWhenKnown() {
+        String body = RelayReincarnationClient.buildPostBody(
+                new PostPayload("SNAP", "Steve", "uuid-1", 7, "", List.of(), "hard"));
+        assertEquals("hard", JsonParser.parseString(body).getAsJsonObject().get("difficulty").getAsString());
+    }
+
+    @Test
+    void postBodyOmitsAnUnknownDifficulty() {
+        // A life logged before the partition existed: the field is omitted and the relay files it in its
+        // legacy partition, so the body is identical to what a pre-partition build sent.
+        for (String unknown : new String[] {"", null}) {
+            String body = RelayReincarnationClient.buildPostBody(
+                    new PostPayload("SNAP", "Steve", "uuid-1", 7, "", List.of(), unknown));
+            assertFalse(JsonParser.parseString(body).getAsJsonObject().has("difficulty"));
+        }
+        // The 6-arg convenience ctor means "unknown" too.
+        String body = RelayReincarnationClient.buildPostBody(
+                new PostPayload("SNAP", "Steve", "uuid-1", 7, "", List.of()));
+        assertFalse(JsonParser.parseString(body).getAsJsonObject().has("difficulty"));
+    }
+
     // --- GET query URL -----------------------------------------------------
 
     @Test
@@ -118,6 +140,20 @@ class RelayReincarnationClientTest {
     void queryUrlIncludesEncodedEtagWhenPresent() {
         String url = RelayReincarnationClient.buildQueryUrl(BASE, 12, 30, null, 5, "1.2.3");
         assertEquals(BASE + "/reincarnations?radius=30&limit=5&carriage=12&etag=1.2.3", url);
+    }
+
+    @Test
+    void queryUrlIncludesTheDifficultyPartitionWhenPresent() {
+        String url = RelayReincarnationClient.buildQueryUrl(BASE, 12, 30, null, 5, "1.2.3", "hard");
+        assertEquals(BASE + "/reincarnations?radius=30&limit=5&carriage=12&etag=1.2.3&difficulty=hard", url);
+    }
+
+    @Test
+    void queryUrlOmitsTheDifficultyWhenBlankOrNull() {
+        // No partition asked for → the whole pool, which is what every pre-partition client requests.
+        assertFalse(RelayReincarnationClient.buildQueryUrl(BASE, 12, 30, null, 5, null, null).contains("difficulty"));
+        assertFalse(RelayReincarnationClient.buildQueryUrl(BASE, 12, 30, null, 5, null, "").contains("difficulty"));
+        assertFalse(RelayReincarnationClient.buildQueryUrl(BASE, 12, 30, null, 5).contains("difficulty"));
     }
 
     @Test

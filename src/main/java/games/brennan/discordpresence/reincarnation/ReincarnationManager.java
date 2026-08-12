@@ -207,8 +207,10 @@ public final class ReincarnationManager {
         if (!query.isCarriage() || owner == null) {
             return List.of();
         }
-        cache.observe(owner, query.carriage());
-        return cache.candidatesFor(owner);
+        // The difficulty partition rides along: it selects which band to pre-fetch, and a band belonging
+        // to a difficulty the player has since left is not offered.
+        cache.observe(owner, query.carriage(), query.difficulty());
+        return cache.candidatesFor(owner, query.difficulty());
     }
 
     // --- the periodic tick (off the server thread) ---------------------------
@@ -269,7 +271,11 @@ public final class ReincarnationManager {
             String playerId = d.playerId() != null ? d.playerId().toString() : null;
             List<String> friends = SnapshotCodec.encodeAll(d.friendSnapshots());
             outbox.enqueue(d.key(),
-                    new PostPayload(snapshot, d.name(), playerId, carriage, d.skinUrl(), friends));
+                    // The difficulty comes from PlayerMob's own record, not from the live level: the death
+                    // may have been logged on another difficulty (or long ago, in which case it is blank and
+                    // the relay files it in its legacy partition).
+                    new PostPayload(snapshot, d.name(), playerId, carriage, d.skinUrl(), friends,
+                            d.difficulty()));
         }
         drainOutbox(base);
     }
@@ -304,17 +310,21 @@ public final class ReincarnationManager {
             return;
         }
         long now = System.currentTimeMillis();
-        Map<UUID, Integer> toFetch = cache.bandsToFetch(now, REFRESH_COOLDOWN_MILLIS, BAND_DRIFT);
-        for (Map.Entry<UUID, Integer> e : toFetch.entrySet()) {
+        Map<UUID, ReincarnationCache.FetchTarget> toFetch =
+                cache.bandsToFetch(now, REFRESH_COOLDOWN_MILLIS, BAND_DRIFT);
+        for (Map.Entry<UUID, ReincarnationCache.FetchTarget> e : toFetch.entrySet()) {
             UUID owner = e.getKey();
-            int carriage = e.getValue();
+            int carriage = e.getValue().carriage();
+            String difficulty = e.getValue().difficulty();
             if (!cache.tryBeginFetch(owner)) {
                 continue;
             }
             Integer carriageParam = carriage == s.noCarriage() ? null : carriage;
             // Send the tag of the band we already hold: an unchanged band comes back with no snapshots.
-            String etag = cache.etagFor(owner);
-            RelayReincarnationClient.fetch(base, carriageParam, INBOUND_RADIUS, owner.toString(), INBOUND_LIMIT, etag)
+            // Scoped to this partition — the tag of another difficulty's band must never be sent.
+            String etag = cache.etagFor(owner, difficulty);
+            RelayReincarnationClient.fetch(base, carriageParam, INBOUND_RADIUS, owner.toString(), INBOUND_LIMIT,
+                    etag, difficulty)
                     .whenComplete((result, err) -> {
                         try {
                             if (err == null && result != null && result.unchanged()) {
@@ -323,10 +333,12 @@ public final class ReincarnationManager {
                                 cache.touch(owner, System.currentTimeMillis());
                             } else {
                                 BuiltBand band = (err != null || result == null)
-                                        ? new BuiltBand(List.of(), List.of()) : buildRecords(s, result.records());
+                                        ? new BuiltBand(List.of(), List.of())
+                                        : buildRecords(s, result.records(), difficulty);
                                 String newEtag = result == null ? null : result.etag();
                                 // Store even an empty band so the cooldown applies (don't re-poll every tick).
-                                cache.store(owner, carriage, band.records(), newEtag, System.currentTimeMillis());
+                                cache.store(owner, carriage, difficulty, band.records(), newEtag,
+                                        System.currentTimeMillis());
                             }
                         } catch (Exception ex) {
                             LOGGER.debug("Discord Presence: reincarnation inbound store failed: {}", ex.toString());
@@ -346,6 +358,18 @@ public final class ReincarnationManager {
 
     /** Decode each relay record and build a real seam record; drop any that fail to decode/build. */
     private BuiltBand buildRecords(PlayerMobSeam s, List<RelayRecord> records) {
+        return buildRecords(s, records, null);
+    }
+
+    /**
+     * As {@link #buildRecords(PlayerMobSeam, List)}, stamping {@code difficulty} on every built life.
+     *
+     * <p>The relay's game-facing record shape deliberately doesn't return the partition — it filtered
+     * server-side, so the band it sent IS that partition. Stamping the value we asked for is therefore
+     * accurate, and it is what lets PlayerMob's own partition check pass instead of discarding the band as
+     * unknown-difficulty. When we asked for no partition the field stays blank, exactly as before.</p>
+     */
+    private BuiltBand buildRecords(PlayerMobSeam s, List<RelayRecord> records, String difficulty) {
         List<Object> out = new ArrayList<>(records.size());
         List<String> dropped = new ArrayList<>();
         for (RelayRecord r : records) {
@@ -365,6 +389,7 @@ public final class ReincarnationManager {
                     r.name() != null ? r.name() : "",
                     carriage,
                     r.skinUrl() != null ? r.skinUrl() : "",
+                    difficulty != null ? difficulty : "",
                     snapshot,
                     friends);
             Object built = s.buildRecord(dto);

@@ -13,8 +13,15 @@ import java.util.UUID;
  * @param carriage the Dungeon-Train carriage band centre (meaningful for {@code CARRIAGE} mode)
  * @param player   a specific player to match (for {@code PLAYER} mode), else {@code null}
  * @param owner    the nearby live player whose session gates reuse, or {@code null}
+ * @param difficulty the vanilla-difficulty partition to draw from, or {@code null} for the whole pool
+ *                   (PlayerMob older than 0.87.0, or its isolation config turned off)
  */
-public record ReincarnationQueryData(String mode, int carriage, UUID player, UUID owner) {
+public record ReincarnationQueryData(String mode, int carriage, UUID player, UUID owner, String difficulty) {
+
+    /** A query with no difficulty partition — the shape before the partition existed. */
+    public ReincarnationQueryData(String mode, int carriage, UUID player, UUID owner) {
+        this(mode, carriage, player, owner, null);
+    }
 
     /** Whether this is a carriage-band query (the Dungeon-Train spawn path DP pre-fetches for). */
     public boolean isCarriage() {

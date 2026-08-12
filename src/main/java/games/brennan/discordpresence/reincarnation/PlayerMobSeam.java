@@ -45,9 +45,18 @@ final class PlayerMobSeam {
     private final Class<?> sourceClass;
     private final Method registerMethod;     // ReincarnationSources.register(ReincarnationSource)
     private final Method recentDeathsMethod; // ReincarnationSources.recentDeaths(MinecraftServer, int)
-    private final Constructor<?> recordCtor; // ReincarnationRecord canonical ctor (8 args)
+    private final Constructor<?> recordCtor; // ReincarnationRecord ctor without difficulty (8 args)
     private final Method recSourceId, recKey, recPlayerId, recName, recCarriage, recSkinUrl, recSnapshot, recFriends;
     private final Method qMode, qCarriage, qPlayer, qOwner;
+
+    /**
+     * The difficulty-partition handles, added in PlayerMob 0.87.0 — <b>optional</b>, unlike every handle
+     * above. A missing one leaves the seam fully {@link #available()} and simply unpartitioned, so DP
+     * keeps working against an older PlayerMob instead of going inert over a feature it can live without.
+     */
+    private final Constructor<?> recordCtorWithDifficulty; // 9 args: ..., skinUrl, difficulty, snapshot, friends
+    private final Method recDifficulty;                    // ReincarnationRecord.difficulty()
+    private final Method qDifficulty;                      // ReincarnationQuery.difficulty()
 
     PlayerMobSeam() {
         boolean ok = false;
@@ -57,6 +66,8 @@ final class PlayerMobSeam {
         Constructor<?> ctor = null;
         Method aSrc = null, aKey = null, aPid = null, aName = null, aCar = null, aSkin = null, aSnap = null, aFri = null;
         Method mMode = null, mCar = null, mPlayer = null, mOwner = null;
+        Constructor<?> ctorDiff = null;
+        Method aDiff = null, mDiff = null;
         try {
             srcC = Class.forName(PKG + "ReincarnationSource");
             Class<?> sourcesC = Class.forName(PKG + "ReincarnationSources");
@@ -82,6 +93,20 @@ final class PlayerMobSeam {
             mOwner = queryC.getMethod("owner");
             noCar = trainC.getField("NO_CARRIAGE").getInt(null);
             ok = true;
+            // Optional (PlayerMob >= 0.87.0): resolved after ok=true and swallowed separately, so an
+            // older PlayerMob costs the partition, not the whole seam.
+            try {
+                ctorDiff = recordC.getDeclaredConstructor(String.class, String.class, UUID.class, String.class,
+                        int.class, String.class, String.class, CompoundTag.class, List.class);
+                aDiff = recordC.getMethod("difficulty");
+                mDiff = queryC.getMethod("difficulty");
+            } catch (Throwable partition) {
+                ctorDiff = null;
+                aDiff = null;
+                mDiff = null;
+                LOGGER.info("Discord Presence: PlayerMob has no reincarnation difficulty partition ({}); "
+                        + "the relay pool stays unpartitioned.", partition.toString());
+            }
         } catch (Throwable t) {
             LOGGER.warn("Discord Presence: PlayerMob reincarnation seam unavailable ({}); "
                     + "cross-world reincarnation disabled.", t.toString());
@@ -104,6 +129,14 @@ final class PlayerMobSeam {
         this.qCarriage = mCar;
         this.qPlayer = mPlayer;
         this.qOwner = mOwner;
+        this.recordCtorWithDifficulty = ctorDiff;
+        this.recDifficulty = aDiff;
+        this.qDifficulty = mDiff;
+    }
+
+    /** Whether this PlayerMob build partitions the reincarnation pool by difficulty (>= 0.87.0). */
+    boolean supportsDifficultyPartition() {
+        return available && recordCtorWithDifficulty != null && recDifficulty != null && qDifficulty != null;
     }
 
     /** Whether the seam resolved fully — PlayerMob is loaded and its v0.45.0 signatures are present. */
@@ -172,7 +205,8 @@ final class PlayerMobSeam {
         int carriage = (Integer) qCarriage.invoke(query);
         UUID player = (UUID) qPlayer.invoke(query);
         UUID owner = (UUID) qOwner.invoke(query);
-        return new ReincarnationQueryData(modeName, carriage, player, owner);
+        String difficulty = qDifficulty == null ? null : (String) qDifficulty.invoke(query);
+        return new ReincarnationQueryData(modeName, carriage, player, owner, difficulty);
     }
 
     /**
@@ -212,6 +246,7 @@ final class PlayerMobSeam {
                     (String) recName.invoke(rec),
                     (Integer) recCarriage.invoke(rec),
                     (String) recSkinUrl.invoke(rec),
+                    recDifficulty == null ? "" : (String) recDifficulty.invoke(rec),
                     (CompoundTag) recSnapshot.invoke(rec),
                     (List<CompoundTag>) recFriends.invoke(rec));
         } catch (Throwable t) {
@@ -231,6 +266,11 @@ final class PlayerMobSeam {
         }
         try {
             List<CompoundTag> friends = d.friendSnapshots() != null ? d.friendSnapshots() : List.of();
+            if (recordCtorWithDifficulty != null) {
+                return recordCtorWithDifficulty.newInstance(d.sourceId(), d.key(), d.playerId(), d.name(),
+                        d.carriage(), d.skinUrl(), d.difficulty() == null ? "" : d.difficulty(),
+                        d.snapshot(), friends);
+            }
             return recordCtor.newInstance(d.sourceId(), d.key(), d.playerId(), d.name(),
                     d.carriage(), d.skinUrl(), d.snapshot(), friends);
         } catch (Throwable t) {

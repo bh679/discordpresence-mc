@@ -234,6 +234,9 @@ final class ReincarnationOutbox {
         if (p.skinUrl() != null) {
             o.addProperty("skinUrl", p.skinUrl());
         }
+        if (p.difficulty() != null && !p.difficulty().isBlank()) {
+            o.addProperty("difficulty", p.difficulty());
+        }
         if (p.friends() != null && !p.friends().isEmpty()) {
             JsonArray arr = new JsonArray();
             for (String f : p.friends()) {
@@ -266,9 +269,13 @@ final class ReincarnationOutbox {
                 }
             }
         }
+        // A death queued by a pre-partition build has no "difficulty" — it posts blank, and the relay
+        // files it in its legacy partition. Same outcome as if it had been delivered before this existed.
+        String difficulty = optString(o, "difficulty");
         return new QueueEntry(key, new PostPayload(
                 snapshot, optString(o, "name"), optString(o, "playerId"),
-                optInt(o, "carriage"), optString(o, "skinUrl"), friends));
+                optInt(o, "carriage"), optString(o, "skinUrl"), friends,
+                difficulty == null ? "" : difficulty));
     }
 
     private static String optString(JsonObject o, String key) {
