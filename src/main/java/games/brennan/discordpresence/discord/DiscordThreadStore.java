@@ -95,6 +95,33 @@ final class DiscordThreadStore {
     }
 
     /**
+     * Drop the entry whose thread id is {@code threadId} — the thread was deleted on Discord, so the
+     * stored id is dead and must not be reused (without this the mod would keep posting into a gone
+     * thread every session, forever). The player's next join takes the first-join path again and
+     * creates a fresh thread.
+     *
+     * <p>Looked up by thread id rather than uuid because the failing HTTP call only knows the id it
+     * aimed at. The map holds one entry per player who has ever joined, so the scan is cheap, and it
+     * is authoritative where {@link PlayerMessageIndex} (a bounded LRU) may already have forgotten
+     * the id. Idempotent: a second call for the same id finds nothing and returns {@code null}, so
+     * concurrent failures for one player evict (and log) once.</p>
+     *
+     * @return the uuid whose entry was removed, or {@code null} when no entry matched (nothing written).
+     */
+    UUID removeByThreadId(String threadId) {
+        if (threadId == null || threadId.isBlank()) {
+            return null;
+        }
+        for (Map.Entry<UUID, DiscordMessageRef> e : threads.entrySet()) {
+            if (threadId.equals(e.getValue().messageId()) && threads.remove(e.getKey(), e.getValue())) {
+                save();
+                return e.getKey();
+            }
+        }
+        return null;
+    }
+
+    /**
      * Parse one stored value into a ref: the new object form
      * {@code {channelId, messageId}}, or the legacy bare thread-id string
      * (parent channel unknown). Returns {@code null} when unusable.

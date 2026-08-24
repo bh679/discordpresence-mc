@@ -50,6 +50,13 @@ final class PlayerMessageIndex {
         return messageId == null ? null : map.get(messageId);
     }
 
+    /** Forget a tracked message — used when its thread turns out to be deleted on Discord. */
+    void remove(String messageId) {
+        if (messageId != null) {
+            map.remove(messageId);
+        }
+    }
+
     boolean contains(String messageId) {
         return get(messageId) != null;
     }

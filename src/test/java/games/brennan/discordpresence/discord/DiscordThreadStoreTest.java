@@ -110,6 +110,50 @@ class DiscordThreadStoreTest {
     }
 
     @Test
+    void removeByThreadIdForgetsTheEntryAndPersists(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("discordpresence-threads.json");
+        DiscordThreadStore store = new DiscordThreadStore();
+        store.load(file);
+        store.put(PLAYER, new DiscordMessageRef("chan-9", "thread-9"));
+
+        assertEquals(PLAYER, store.removeByThreadId("thread-9"));
+        assertNull(store.get(PLAYER));
+
+        // The deletion is written through — the dead id must not come back on the next server start.
+        DiscordThreadStore reloaded = new DiscordThreadStore();
+        reloaded.load(file);
+        assertNull(reloaded.get(PLAYER), "evicted thread must not survive a reload");
+    }
+
+    @Test
+    void removeByThreadIdIsIdempotentAndIgnoresUnknownIds(@TempDir Path dir) {
+        Path file = dir.resolve("discordpresence-threads.json");
+        DiscordThreadStore store = new DiscordThreadStore();
+        store.load(file);
+        store.put(PLAYER, new DiscordMessageRef("chan-9", "thread-9"));
+
+        assertNull(store.removeByThreadId("someone-elses-thread"), "unrelated id evicts nothing");
+        assertNull(store.removeByThreadId(null));
+        assertEquals("thread-9", store.threadId(PLAYER), "the live entry is untouched");
+
+        assertEquals(PLAYER, store.removeByThreadId("thread-9"));
+        // Concurrent failures for one player must evict (and log) only once.
+        assertNull(store.removeByThreadId("thread-9"));
+    }
+
+    @Test
+    void removeByThreadIdWorksForLegacyEntries(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("discordpresence-threads.json");
+        Files.writeString(file, "{\"" + PLAYER + "\":\"thread-legacy\"}", StandardCharsets.UTF_8);
+
+        DiscordThreadStore store = new DiscordThreadStore();
+        store.load(file);
+
+        assertEquals(PLAYER, store.removeByThreadId("thread-legacy"));
+        assertNull(store.threadId(PLAYER));
+    }
+
+    @Test
     void missingFileYieldsEmpty(@TempDir Path dir) {
         DiscordThreadStore store = new DiscordThreadStore();
         store.load(dir.resolve("does-not-exist.json"));
