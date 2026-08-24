@@ -111,11 +111,23 @@ final class DiscordThreadClient {
      * {@code fields}, e.g. the advancement's requirements), the embed colour
      * matching the in-game advancement frame.
      *
+     * <p>{@code advancementId} is the earned advancement's registry id
+     * ({@code dungeontrain:dungeon_train/root}). It is sent as the {@code X-DT-Advancement} request
+     * header, and ONLY in relay mode — the relay reads it for its own analytics and does not forward
+     * it, whereas a direct-to-Discord post has no reason to carry it. The embed itself is unchanged,
+     * so players see exactly what they saw before.
+     *
+     * <p>Why a header rather than something in the embed: the embed carries the advancement's DISPLAY
+     * TITLE, which is rendered in this server's locale, so it identifies an advancement only to a
+     * reader who knows that locale. Analytics keyed off it counted English servers and silently
+     * dropped the rest.
+     *
      * @return a future of the posted message ref, or {@code null} on failure.
      */
     static CompletableFuture<DiscordMessageRef> postEmbed(String channelId, String content,
                                                           String title, String description, Integer color,
-                                                          String iconUrl, List<DeathField> fields) {
+                                                          String iconUrl, List<DeathField> fields,
+                                                          String advancementId) {
         if (channelId == null) {
             return CompletableFuture.completedFuture(null);
         }
@@ -170,8 +182,12 @@ final class DiscordThreadClient {
 
         URI uri = URI.create(DiscordPresenceConfig.getBotApiBase() + "/channels/" + channelId + "/messages");
 
-        HttpRequest req = DiscordHttp.botRequest(uri)
-                .header("Content-Type", "application/json")
+        HttpRequest.Builder reqBuilder = DiscordHttp.botRequest(uri)
+                .header("Content-Type", "application/json");
+        if (advancementId != null && !advancementId.isBlank() && DiscordPresenceConfig.isRelayMode()) {
+            reqBuilder.header("X-DT-Advancement", advancementId);
+        }
+        HttpRequest req = reqBuilder
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
                 .build();
 
