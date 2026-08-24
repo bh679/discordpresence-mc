@@ -12,7 +12,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -33,6 +35,15 @@ final class DiscordThreadClient {
 
     /** One-shot WARN de-dupe so a misconfigured token/perms doesn't spam the log. */
     private static final AtomicBoolean WARNED_AUTH = new AtomicBoolean(false);
+
+    /**
+     * Targets already warned about with a 404, so one deleted thread doesn't log on every advancement.
+     * Keyed per target rather than globally (as {@link #WARNED_AUTH} is) so a dead thread can't mute the
+     * warning for every other thread; bounded, and cleared wholesale when full — the worst case is one
+     * repeated warning on a server churning through hundreds of deleted targets.
+     */
+    private static final Set<String> WARNED_MISSING = ConcurrentHashMap.newKeySet();
+    private static final int MAX_WARNED_MISSING = 256;
 
     private DiscordThreadClient() {}
 
@@ -64,7 +75,7 @@ final class DiscordThreadClient {
 
         return DiscordHttp.CLIENT
                 .sendAsync(req, HttpResponse.BodyHandlers.ofString())
-                .thenApply(DiscordThreadClient::parseThreadId)
+                .thenApply(resp -> parseThreadId(resp, anchor.messageId()))
                 .exceptionally(t -> {
                     LOGGER.warn("Discord create-thread failed: {}", t.toString());
                     return null;
@@ -193,7 +204,7 @@ final class DiscordThreadClient {
 
         return DiscordHttp.CLIENT
                 .sendAsync(req, HttpResponse.BodyHandlers.ofString())
-                .thenApply(DiscordThreadClient::parseMessageRef)
+                .thenApply(resp -> parseMessageRef(resp, channelId))
                 .exceptionally(t -> {
                     LOGGER.warn("Discord thread post failed: {}", t.toString());
                     return null;
@@ -232,17 +243,19 @@ final class DiscordThreadClient {
 
         return DiscordHttp.CLIENT
                 .sendAsync(req, HttpResponse.BodyHandlers.ofString())
-                .thenApply(DiscordThreadClient::parseMessageRef)
+                .thenApply(resp -> parseMessageRef(resp, channelId))
                 .exceptionally(t -> {
                     LOGGER.warn("Discord thread plain post failed: {}", t.toString());
                     return null;
                 });
     }
 
-    private static String parseThreadId(HttpResponse<String> resp) {
+    private static String parseThreadId(HttpResponse<String> resp, String anchorMessageId) {
         int code = resp.statusCode();
         if (code != 200 && code != 201) {
-            handleError(code, resp);
+            // The anchor message is not a thread we could have stored (this call is what creates one),
+            // so a 404 here is never a dead-thread eviction — only a de-duped warning.
+            handleError(code, resp, anchorMessageId, false);
             return null;
         }
         try {
@@ -254,10 +267,10 @@ final class DiscordThreadClient {
         }
     }
 
-    private static DiscordMessageRef parseMessageRef(HttpResponse<String> resp) {
+    private static DiscordMessageRef parseMessageRef(HttpResponse<String> resp, String targetChannelId) {
         int code = resp.statusCode();
         if (code != 200 && code != 201) {
-            handleError(code, resp);
+            handleError(code, resp, targetChannelId, true);
             return null;
         }
         try {
@@ -277,7 +290,7 @@ final class DiscordThreadClient {
     private static DiscordMessageRef parseAnchorRef(HttpResponse<String> resp, String threadId) {
         int code = resp.statusCode();
         if (code != 200) {
-            handleError(code, resp);
+            handleError(code, resp, threadId, true);
             return null;
         }
         try {
@@ -291,17 +304,49 @@ final class DiscordThreadClient {
         }
     }
 
-    private static void handleError(int code, HttpResponse<String> resp) {
+    /**
+     * @param targetId    the id the request aimed at (channel/thread/message), used to de-dupe the 404 warning
+     * @param threadTarget whether {@code targetId} is a channel/thread id that may be a player's stored
+     *                     thread — only then can a 404 evict it
+     */
+    private static void handleError(int code, HttpResponse<String> resp, String targetId, boolean threadTarget) {
         switch (code) {
             case 401 -> warnOnce("Discord bot token rejected (401) — check 'botToken' in discordpresence-server.toml.");
             case 403 -> warnOnce("Discord bot lacks permission (403) — grant it Create Public Threads + "
                     + "Send Messages in Threads in the channel.");
             case 429 -> LOGGER.warn("Discord rate-limited the thread request (429), retry-after={}s — dropping it.",
                     resp.headers().firstValue("retry-after").orElse("?"));
-            case 404 -> LOGGER.warn("Discord thread target not found (404) — message/channel/thread deleted: {}",
-                    truncate(resp.body()));
+            case 404 -> handleNotFound(resp, targetId, threadTarget);
             default -> LOGGER.warn("Discord thread API returned HTTP {}: {}", code, truncate(resp.body()));
         }
+    }
+
+    /**
+     * A 404 for a thread target with Discord's "Unknown Channel" code means the thread was deleted (the
+     * relay's reaper trims the least-recently-active threads once a channel hits Discord's active cap, and
+     * humans delete threads too). Forget it, so the player's next join creates a fresh one instead of the
+     * mod posting into a gone thread every session forever. This post itself is dropped, as it already is
+     * for a player without a thread — re-posting every advancement top-level would flood the very channel
+     * the reaper is trimming. The warning is logged once per target, not once per event.
+     */
+    private static void handleNotFound(HttpResponse<String> resp, String targetId, boolean threadTarget) {
+        if (threadTarget && targetId != null
+                && DiscordWebhookClient.discordErrorCode(resp.body()) == DiscordWebhookClient.UNKNOWN_CHANNEL) {
+            DiscordService.reportDeadThread(targetId);
+        }
+        if (warnMissingOnce(targetId)) {
+            LOGGER.warn("Discord thread target {} not found (404) — message/channel/thread deleted: {}",
+                    targetId, truncate(resp.body()));
+        }
+    }
+
+    /** @return true the first time this target 404s (bounded; the set is cleared wholesale when full). */
+    private static boolean warnMissingOnce(String targetId) {
+        String key = targetId == null ? "<unknown>" : targetId;
+        if (WARNED_MISSING.size() >= MAX_WARNED_MISSING) {
+            WARNED_MISSING.clear();
+        }
+        return WARNED_MISSING.add(key);
     }
 
     private static void warnOnce(String msg) {

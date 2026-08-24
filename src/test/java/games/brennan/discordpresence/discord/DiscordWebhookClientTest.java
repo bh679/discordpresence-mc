@@ -70,4 +70,35 @@ class DiscordWebhookClientTest {
         JsonObject e0 = parsed.getAsJsonArray("embeds").get(0).getAsJsonObject();
         assertTrue(e0.has("image"), "a hotlinked embed image is preserved");
     }
+
+    // --- dead-thread detection (a post into a thread the relay's reaper, or a human, deleted) ---
+
+    @Test
+    void readsDiscordErrorCode() {
+        assertEquals(DiscordWebhookClient.UNKNOWN_CHANNEL,
+                DiscordWebhookClient.discordErrorCode("{\"message\":\"Unknown Channel\",\"code\":10003}"));
+        // A 404 can equally mean the webhook itself is gone — that must NOT evict the player's thread.
+        assertEquals(10015, DiscordWebhookClient.discordErrorCode("{\"message\":\"Unknown Webhook\",\"code\":10015}"));
+    }
+
+    @Test
+    void unparseableErrorBodiesYieldNoCode() {
+        assertEquals(0, DiscordWebhookClient.discordErrorCode(null));
+        assertEquals(0, DiscordWebhookClient.discordErrorCode(""));
+        assertEquals(0, DiscordWebhookClient.discordErrorCode("<html>502 Bad Gateway</html>"));
+        assertEquals(0, DiscordWebhookClient.discordErrorCode("[1,2,3]"));
+        assertEquals(0, DiscordWebhookClient.discordErrorCode("{\"message\":\"nope\"}"));
+        assertEquals(0, DiscordWebhookClient.discordErrorCode("{\"code\":\"not-a-number\"}"));
+    }
+
+    @Test
+    void dropsThreadIdForTheTopLevelRetry() {
+        // The dead-thread fallback re-sends the same request with a null thread id; it must still
+        // ask for the created message (wait=true) and must not carry the gone thread.
+        String url = "https://discord.com/api/webhooks/1/tok";
+        assertEquals(url + "?wait=true&thread_id=thread-9", DiscordWebhookClient.withQuery(url, "thread-9"));
+        String topLevel = DiscordWebhookClient.withQuery(url, null);
+        assertFalse(topLevel.contains("thread_id"), "retry must not re-aim at the deleted thread");
+        assertTrue(topLevel.contains("wait=true"));
+    }
 }

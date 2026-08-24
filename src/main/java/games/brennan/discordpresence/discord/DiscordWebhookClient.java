@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 
 /**
  * Posts a message through the configured Discord webhook and parses the created
@@ -35,6 +36,9 @@ import java.util.concurrent.CompletableFuture;
 final class DiscordWebhookClient {
 
     private static final Logger LOGGER = LogUtils.getLogger();
+
+    /** Discord JSON error code for "Unknown Channel" — what a post into a deleted thread comes back as. */
+    static final int UNKNOWN_CHANNEL = 10003;
 
     private DiscordWebhookClient() {}
 
@@ -86,15 +90,13 @@ final class DiscordWebhookClient {
 
         String body = buildPayload(content, playerName, uuid, allowedUserIds);
 
-        HttpRequest req = HttpRequest.newBuilder(URI.create(withQuery(webhookUrl, threadId)))
-                .header("Content-Type", "application/json")
-                .header("User-Agent", "DiscordPresence-Mod")
-                .timeout(DiscordHttp.TIMEOUT)
-                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-                .build();
-
-        return DiscordHttp.sendWithRetry(req)
-                .thenApply(DiscordWebhookClient::parseMessageRef)
+        return sendAndParse(tid -> HttpRequest.newBuilder(URI.create(withQuery(webhookUrl, tid)))
+                        .header("Content-Type", "application/json")
+                        .header("User-Agent", "DiscordPresence-Mod")
+                        .timeout(DiscordHttp.TIMEOUT)
+                        .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                        .build(),
+                threadId)
                 .exceptionally(t -> onSendFailed("Discord webhook POST failed", t, webhookUrl, threadId, body));
     }
 
@@ -149,28 +151,29 @@ final class DiscordWebhookClient {
 
         JsonObject root = buildReportRoot(playerName, uuid, embed, content, allowedUserIds);
 
-        String url = withQuery(webhookUrl, threadId);
-        HttpRequest req;
-        if (png != null) {
-            String boundary = "DPBoundary" + UUID.randomUUID().toString().replace("-", "");
-            MultipartBody mb = MultipartBody.jsonWithPng(boundary, root.toString(), "files[0]", filename, png);
-            req = HttpRequest.newBuilder(URI.create(url))
-                    .header("Content-Type", mb.contentType())
-                    .header("User-Agent", "DiscordPresence-Mod")
-                    .timeout(DiscordHttp.REPORT_TIMEOUT)  // image upload — needs more than the 10s JSON timeout
-                    .POST(HttpRequest.BodyPublishers.ofByteArray(mb.body()))
-                    .build();
-        } else {
-            req = HttpRequest.newBuilder(URI.create(url))
+        // Built once and reused for the dead-thread retry below (only the URL's thread_id differs).
+        MultipartBody mb = png == null ? null : MultipartBody.jsonWithPng(
+                "DPBoundary" + UUID.randomUUID().toString().replace("-", ""),
+                root.toString(), "files[0]", filename, png);
+        Function<String, HttpRequest> build = tid -> {
+            String url = withQuery(webhookUrl, tid);
+            if (mb != null) {
+                return HttpRequest.newBuilder(URI.create(url))
+                        .header("Content-Type", mb.contentType())
+                        .header("User-Agent", "DiscordPresence-Mod")
+                        .timeout(DiscordHttp.REPORT_TIMEOUT)  // image upload — needs more than the 10s JSON timeout
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(mb.body()))
+                        .build();
+            }
+            return HttpRequest.newBuilder(URI.create(url))
                     .header("Content-Type", "application/json")
                     .header("User-Agent", "DiscordPresence-Mod")
                     .timeout(DiscordHttp.TIMEOUT)
                     .POST(HttpRequest.BodyPublishers.ofString(root.toString(), StandardCharsets.UTF_8))
                     .build();
-        }
+        };
 
-        return DiscordHttp.sendWithRetry(req)
-                .thenApply(DiscordWebhookClient::parseMessageRef)
+        return sendAndParse(build, threadId)
                 // Only the JSON embed is made durable: a multipart image post (png != null) is re-queued
                 // as the embed WITHOUT the attachment image (the PNG isn't persisted), so a replay renders
                 // the report minus the gear picture rather than a broken attachment.
@@ -194,17 +197,15 @@ final class DiscordWebhookClient {
             return CompletableFuture.completedFuture(null);
         }
         JsonObject root = buildContentRoot(playerName, uuid, content, allowedUserIds);
-        String url = withQuery(webhookUrl, threadId);
         String boundary = "DPBoundary" + UUID.randomUUID().toString().replace("-", "");
         MultipartBody mb = MultipartBody.jsonWithFiles(boundary, root.toString(), files);
-        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                .header("Content-Type", mb.contentType())
-                .header("User-Agent", "DiscordPresence-Mod")
-                .timeout(DiscordHttp.REPORT_TIMEOUT)  // file upload — needs more than the 10s JSON timeout
-                .POST(HttpRequest.BodyPublishers.ofByteArray(mb.body()))
-                .build();
-        return DiscordHttp.sendWithRetry(req)
-                .thenApply(DiscordWebhookClient::parseMessageRef)
+        return sendAndParse(tid -> HttpRequest.newBuilder(URI.create(withQuery(webhookUrl, tid)))
+                        .header("Content-Type", mb.contentType())
+                        .header("User-Agent", "DiscordPresence-Mod")
+                        .timeout(DiscordHttp.REPORT_TIMEOUT)  // file upload — needs more than the 10s JSON timeout
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(mb.body()))
+                        .build(),
+                threadId)
                 // Multipart file uploads stay best-effort: the binary parts aren't persisted, so there is
                 // nothing meaningful to durably resend (the content line alone — "logs attached" — is useless
                 // without the files). Dropped on failure as before.
@@ -225,14 +226,13 @@ final class DiscordWebhookClient {
         if (webhookUrl == null || webhookUrl.isBlank() || rootJson == null || rootJson.isBlank()) {
             return CompletableFuture.completedFuture(null);
         }
-        HttpRequest req = HttpRequest.newBuilder(URI.create(withQuery(webhookUrl, threadId)))
-                .header("Content-Type", "application/json")
-                .header("User-Agent", "DiscordPresence-Mod")
-                .timeout(DiscordHttp.TIMEOUT)
-                .POST(HttpRequest.BodyPublishers.ofString(rootJson, StandardCharsets.UTF_8))
-                .build();
-        return DiscordHttp.sendWithRetry(req)
-                .thenApply(DiscordWebhookClient::parseMessageRef)
+        return sendAndParse(tid -> HttpRequest.newBuilder(URI.create(withQuery(webhookUrl, tid)))
+                        .header("Content-Type", "application/json")
+                        .header("User-Agent", "DiscordPresence-Mod")
+                        .timeout(DiscordHttp.TIMEOUT)
+                        .POST(HttpRequest.BodyPublishers.ofString(rootJson, StandardCharsets.UTF_8))
+                        .build(),
+                threadId)
                 .exceptionally(t -> {
                     LOGGER.warn("Discord webhook resend failed (kept for next flush): {}", t.toString());
                     return null;
@@ -355,13 +355,67 @@ final class DiscordWebhookClient {
      * channel_id); {@code thread_id} (a numeric snowflake, safe unencoded) routes
      * the post into an existing thread.
      */
-    private static String withQuery(String webhookUrl, String threadId) {
+    static String withQuery(String webhookUrl, String threadId) {
         StringBuilder sb = new StringBuilder(webhookUrl);
         sb.append(webhookUrl.contains("?") ? "&" : "?").append("wait=true");
         if (threadId != null && !threadId.isBlank()) {
             sb.append("&thread_id=").append(threadId);
         }
         return sb.toString();
+    }
+
+    /**
+     * Send the request and parse the created message, healing a deleted thread on the way: when the
+     * post was aimed at a thread and Discord answers "Unknown Channel", the thread is gone (the relay's
+     * reaper deletes least-recently-active threads once a channel hits Discord's active cap, and humans
+     * delete threads too). Two things then happen: the dead id is evicted from the durable store so the
+     * player's next join creates a fresh thread, and the SAME post is re-sent once to the parent channel
+     * so the message isn't silently lost — which matters most direct-to-Discord, where no relay is there
+     * to re-aim it. A 10003 means Discord rejected the request outright, so the retry cannot duplicate.
+     *
+     * <p>Only 10003 counts: a bare 404 can equally mean the webhook itself is gone (10015), and evicting
+     * the player's thread for that would be wrong. Every other status parses exactly as before.</p>
+     *
+     * @param buildForThread builds the request for a given thread id ({@code null} → top-level)
+     */
+    private static CompletableFuture<DiscordMessageRef> sendAndParse(
+            Function<String, HttpRequest> buildForThread, String threadId) {
+        return DiscordHttp.sendWithRetry(buildForThread.apply(threadId))
+                .thenCompose(resp -> {
+                    if (threadId == null || !isDeadThread(resp)) {
+                        return CompletableFuture.completedFuture(parseMessageRef(resp));
+                    }
+                    DiscordService.reportDeadThread(threadId);
+                    LOGGER.warn("Discord thread {} no longer exists — reposting to the parent channel.", threadId);
+                    return DiscordHttp.sendWithRetry(buildForThread.apply(null))
+                            .thenApply(DiscordWebhookClient::parseMessageRef);
+                });
+    }
+
+    private static boolean isDeadThread(HttpResponse<String> resp) {
+        return resp.statusCode() == 404 && discordErrorCode(resp.body()) == UNKNOWN_CHANNEL;
+    }
+
+    /**
+     * The {@code code} of a Discord JSON error body ({@code {"message":"Unknown Channel","code":10003}}),
+     * or {@code 0} when the body is absent, not JSON, or carries no numeric code. Pure, so the
+     * dead-thread decision is unit-testable without HTTP.
+     */
+    static int discordErrorCode(String body) {
+        if (body == null || body.isBlank()) {
+            return 0;
+        }
+        try {
+            JsonElement parsed = JsonParser.parseString(body);
+            if (!parsed.isJsonObject()) {
+                return 0;
+            }
+            JsonElement code = parsed.getAsJsonObject().get("code");
+            return code != null && code.isJsonPrimitive() && code.getAsJsonPrimitive().isNumber()
+                    ? code.getAsInt() : 0;
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private static DiscordMessageRef parseMessageRef(HttpResponse<String> resp) {

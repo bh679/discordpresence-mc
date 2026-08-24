@@ -1433,6 +1433,33 @@ public final class DiscordService {
     }
 
     /**
+     * A stored thread turned out to be gone on Discord (an "Unknown Channel" error for a post aimed at
+     * it — the relay's thread reaper deletes least-recently-active threads once a channel hits Discord's
+     * active-thread cap, and a human can delete one at any time). Forget it everywhere so the mod
+     * self-heals: the durable store (otherwise the dead id is re-read every session forever), the
+     * in-flight thread future, and the inbound-routing index.
+     *
+     * <p>After eviction {@code threadStore.threadId(uuid)} is null, so the rest of the session posts
+     * top-level — every call site already treats a null thread id that way — and the player's next join
+     * takes the first-join path, creating a fresh thread. Called off-thread from the HTTP clients;
+     * idempotent, so concurrent failures for one player evict and log once.</p>
+     */
+    static void reportDeadThread(String threadId) {
+        INSTANCE.evictDeadThread(threadId);
+    }
+
+    private void evictDeadThread(String threadId) {
+        UUID uuid = threadStore.removeByThreadId(threadId);
+        if (uuid == null) {
+            return; // already evicted, or never ours
+        }
+        threadFutures.remove(uuid);
+        reverse.remove(threadId);
+        LOGGER.info("Discord Presence: thread {} for {} no longer exists on Discord — forgotten; "
+                + "a fresh thread will be created on their next join.", threadId, uuid);
+    }
+
+    /**
      * Whether an advancement should be announced, given the configured filters.
      * {@code allowedNamespaces} empty = all namespaces.
      */
