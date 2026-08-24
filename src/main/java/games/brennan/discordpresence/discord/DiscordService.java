@@ -789,7 +789,8 @@ public final class DiscordService {
 
         threadFuture.thenAccept(threadId -> {
             if (threadId != null) {
-                var embedPost = DiscordThreadClient.postEmbed(threadId, content, title, description, color, iconUrl, fields);
+                var embedPost = DiscordThreadClient.postEmbed(threadId, content, title, description, color, iconUrl, fields,
+                        holder.id().toString());
                 if (!stateSuffix.isBlank()) {
                     embedPost.thenRun(() -> DiscordThreadClient.postPlain(threadId, stateSuffix));
                 }
