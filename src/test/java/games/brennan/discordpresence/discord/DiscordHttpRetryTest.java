@@ -42,6 +42,41 @@ class DiscordHttpRetryTest {
         assertFalse(DiscordHttp.isRetryableStatus(404));
     }
 
+    // --- message-creating posts: no 5xx retry ------------------------------
+
+    @Test
+    void messageCreatingPostsDoNotRetryServerErrors() {
+        // Behind the relay a 5xx is ambiguous: the relay aborts its upstream forward on a timeout and
+        // answers 502, but the body it streamed may already have created the message. Resending it is
+        // how one death report landed in the public feed several times.
+        assertFalse(DiscordHttp.shouldRetryStatus(500, false));
+        assertFalse(DiscordHttp.shouldRetryStatus(502, false), "relay upstream_error must not be resent");
+        assertFalse(DiscordHttp.shouldRetryStatus(503, false));
+        assertFalse(DiscordHttp.shouldRetryStatus(599, false));
+    }
+
+    @Test
+    void messageCreatingPostsStillRetryRateLimits() {
+        // A 429 provably created nothing, so it stays retryable under either policy.
+        assertTrue(DiscordHttp.shouldRetryStatus(429, false), "429 created nothing — still safe to retry");
+        assertTrue(DiscordHttp.shouldRetryStatus(429, true));
+    }
+
+    @Test
+    void idempotentCallsKeepTheServerErrorRetry() {
+        assertTrue(DiscordHttp.shouldRetryStatus(500, true));
+        assertTrue(DiscordHttp.shouldRetryStatus(502, true));
+    }
+
+    @Test
+    void successAndClientErrorsNeverRetryUnderEitherPolicy() {
+        for (boolean retryServerErrors : new boolean[] {true, false}) {
+            assertFalse(DiscordHttp.shouldRetryStatus(200, retryServerErrors));
+            assertFalse(DiscordHttp.shouldRetryStatus(400, retryServerErrors));
+            assertFalse(DiscordHttp.shouldRetryStatus(404, retryServerErrors));
+        }
+    }
+
     // --- which exceptions are retryable -----------------------------------
 
     @Test

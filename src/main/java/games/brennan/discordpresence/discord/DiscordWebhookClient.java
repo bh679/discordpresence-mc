@@ -376,18 +376,23 @@ final class DiscordWebhookClient {
      * <p>Only 10003 counts: a bare 404 can equally mean the webhook itself is gone (10015), and evicting
      * the player's thread for that would be wrong. Every other status parses exactly as before.</p>
      *
+     * <p>Every send here CREATES a message, so both go out with {@code retryServerErrors=false}: a 5xx
+     * cannot be resent without risking a duplicate, because behind the relay it may be the relay
+     * abandoning a forward that had already reached Discord (see {@link DiscordHttp#shouldRetryStatus}).
+     * 429s and pre-send connection failures are still retried — those provably created nothing.</p>
+     *
      * @param buildForThread builds the request for a given thread id ({@code null} → top-level)
      */
     private static CompletableFuture<DiscordMessageRef> sendAndParse(
             Function<String, HttpRequest> buildForThread, String threadId) {
-        return DiscordHttp.sendWithRetry(buildForThread.apply(threadId))
+        return DiscordHttp.sendWithRetry(buildForThread.apply(threadId), false)
                 .thenCompose(resp -> {
                     if (threadId == null || !isDeadThread(resp)) {
                         return CompletableFuture.completedFuture(parseMessageRef(resp));
                     }
                     DiscordService.reportDeadThread(threadId);
                     LOGGER.warn("Discord thread {} no longer exists — reposting to the parent channel.", threadId);
-                    return DiscordHttp.sendWithRetry(buildForThread.apply(null))
+                    return DiscordHttp.sendWithRetry(buildForThread.apply(null), false)
                             .thenApply(DiscordWebhookClient::parseMessageRef);
                 });
     }
