@@ -100,6 +100,15 @@ public final class DiscordHttp {
     // honouring the server's Retry-After, while ambiguous failures (a read timeout
     // after the body went out — Discord may have created the message; webhooks have no
     // idempotency key) are NOT retried, so a report can never be duplicated.
+    //
+    // A 5xx is only *provably* harmless to resend when it comes from Discord itself. When the call
+    // goes through the relay (relay-mode), a 5xx is just as ambiguous as a read timeout: the relay
+    // aborts its own upstream forward on a timeout and answers 502 upstream_error, yet the body it
+    // already streamed may well have created the message. That is how a death report with a ~1 MB
+    // image attached — the one post slow enough to blow the relay's upstream budget — landed in the
+    // public feed two to four times. Hence retryServerErrors: message-CREATING posts pass false and
+    // keep only the unambiguous retries (429, pre-send connection failures); reads and other
+    // idempotent calls keep the 5xx retry.
 
     /** Total attempts (1 initial + 3 retries). */
     static final int MAX_ATTEMPTS = 4;
@@ -118,39 +127,54 @@ public final class DiscordHttp {
      * a caller's existing {@code .exceptionally(...)} fallback keeps working unchanged.
      */
     public static CompletableFuture<HttpResponse<String>> sendWithRetry(HttpRequest request) {
-        return attempt(request, 0);
+        return sendWithRetry(request, true);
     }
 
-    private static CompletableFuture<HttpResponse<String>> attempt(HttpRequest request, int attemptIndex) {
+    /**
+     * As {@link #sendWithRetry(HttpRequest)}, but {@code retryServerErrors} decides whether a 5xx is
+     * resent. Pass {@code false} for any request that CREATES a Discord message (every webhook POST):
+     * behind the relay a 5xx can be the relay abandoning a forward it had already delivered, so a
+     * resend would duplicate the message. 429s and pre-send connection failures are retried either
+     * way — those provably created nothing.
+     */
+    public static CompletableFuture<HttpResponse<String>> sendWithRetry(HttpRequest request,
+                                                                       boolean retryServerErrors) {
+        return attempt(request, 0, retryServerErrors);
+    }
+
+    private static CompletableFuture<HttpResponse<String>> attempt(HttpRequest request, int attemptIndex,
+                                                                   boolean retryServerErrors) {
         return CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                .handle((resp, err) -> evaluate(request, resp, err, attemptIndex))
+                .handle((resp, err) -> evaluate(request, resp, err, attemptIndex, retryServerErrors))
                 .thenCompose(next -> next);
     }
 
     private static CompletableFuture<HttpResponse<String>> evaluate(
-            HttpRequest request, HttpResponse<String> resp, Throwable err, int attemptIndex) {
+            HttpRequest request, HttpResponse<String> resp, Throwable err, int attemptIndex,
+            boolean retryServerErrors) {
         boolean lastAttempt = attemptIndex >= MAX_ATTEMPTS - 1;
         if (err != null) {
             Throwable cause = unwrap(err);
             if (!lastAttempt && isRetryableException(cause)) {
-                return retryAfter(request, attemptIndex, backoffMs(attemptIndex), cause.toString());
+                return retryAfter(request, attemptIndex, backoffMs(attemptIndex), cause.toString(),
+                        retryServerErrors);
             }
             return CompletableFuture.failedFuture(cause); // exhausted / non-retryable → caller's exceptionally(...)
         }
         int code = resp.statusCode();
-        if (!lastAttempt && isRetryableStatus(code)) {
+        if (!lastAttempt && shouldRetryStatus(code, retryServerErrors)) {
             long delay = (code == 429) ? retryAfterMs(resp).orElse(backoffMs(attemptIndex)) : backoffMs(attemptIndex);
-            return retryAfter(request, attemptIndex, delay, "HTTP " + code);
+            return retryAfter(request, attemptIndex, delay, "HTTP " + code, retryServerErrors);
         }
         return CompletableFuture.completedFuture(resp); // success, or a non-retryable status the caller inspects
     }
 
     private static CompletableFuture<HttpResponse<String>> retryAfter(
-            HttpRequest request, int attemptIndex, long delayMs, String reason) {
+            HttpRequest request, int attemptIndex, long delayMs, String reason, boolean retryServerErrors) {
         LOGGER.warn("Discord {} {} failed ({}); retry {}/{} in {} ms",
                 request.method(), request.uri().getPath(), reason, attemptIndex + 1, MAX_ATTEMPTS - 1, delayMs);
         Executor delayed = CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS, EXECUTOR);
-        return CompletableFuture.supplyAsync(() -> attempt(request, attemptIndex + 1), delayed)
+        return CompletableFuture.supplyAsync(() -> attempt(request, attemptIndex + 1, retryServerErrors), delayed)
                 .thenCompose(next -> next);
     }
 
@@ -161,6 +185,19 @@ public final class DiscordHttp {
     /** A status worth retrying: rate-limited (429) or a transient server error (5xx). */
     static boolean isRetryableStatus(int code) {
         return code == 429 || (code >= 500 && code < 600);
+    }
+
+    /**
+     * The retry decision for {@code code} under this send's policy: {@link #isRetryableStatus}, minus
+     * the 5xx branch when {@code retryServerErrors} is false (a message-creating post, where a 5xx
+     * from the relay may follow a forward that already reached Discord). Pure + package-visible for
+     * tests.
+     */
+    static boolean shouldRetryStatus(int code, boolean retryServerErrors) {
+        if (!retryServerErrors && code != 429) {
+            return false;
+        }
+        return isRetryableStatus(code);
     }
 
     /**
