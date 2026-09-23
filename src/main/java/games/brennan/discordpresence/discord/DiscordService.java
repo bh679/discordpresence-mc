@@ -980,8 +980,22 @@ public final class DiscordService {
      */
     public void postDeathReportTopLevel(ServerPlayer player, String title, String description,
                                         List<DeathField> fields, List<ItemStack> iconItems, String webhookOverride) {
+        postDeathReportTopLevel(player, title, description, fields, iconItems, webhookOverride, null);
+    }
+
+    /**
+     * As {@link #postDeathReportTopLevel(ServerPlayer, String, String, List, List, String)} plus a
+     * {@code content} line.
+     *
+     * <p>{@code content} is an optional plain-text line posted above the embed (null/blank = none). It
+     * never pings on its own — {@code allowed_mentions.users} stays empty — but a relay may resolve
+     * markers in it (Dungeon Train's {@code <dt-ping:uuid>} → a ping for a Discord-linked player).</p>
+     */
+    public void postDeathReportTopLevel(ServerPlayer player, String title, String description,
+                                        List<DeathField> fields, List<ItemStack> iconItems, String webhookOverride,
+                                        String content) {
         postReport(player, title, description, fields, iconItems,
-                DiscordPresenceConfig.getDeathReportEmbedColor(), true, webhookOverride);
+                DiscordPresenceConfig.getDeathReportEmbedColor(), true, webhookOverride, content);
     }
 
     /**
@@ -1005,6 +1019,20 @@ public final class DiscordService {
     public void postDeathReportTopLevel(ServerPlayer player, String title, String description,
                                         List<DeathField> fields, byte[] pngImage, String filename,
                                         String webhookOverride) {
+        postDeathReportTopLevel(player, title, description, fields, pngImage, filename, webhookOverride, null);
+    }
+
+    /**
+     * As {@link #postDeathReportTopLevel(ServerPlayer, String, String, List, byte[], String, String)} plus
+     * a {@code content} line.
+     *
+     * <p>{@code content} is an optional plain-text line posted above the embed (null/blank = none). It
+     * never pings on its own — {@code allowed_mentions.users} stays empty — but a relay may resolve
+     * markers in it (Dungeon Train's {@code <dt-ping:uuid>} → a ping for a Discord-linked player).</p>
+     */
+    public void postDeathReportTopLevel(ServerPlayer player, String title, String description,
+                                        List<DeathField> fields, byte[] pngImage, String filename,
+                                        String webhookOverride, String content) {
         if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
@@ -1012,7 +1040,8 @@ public final class DiscordService {
         String name = player.getGameProfile().getName();
         JsonObject embed = buildReportEmbed(title, description, fields,
                 DiscordPresenceConfig.getDeathReportEmbedColor());
-        DiscordWebhookClient.postReport(name, uuid, null, embed, pngImage, filename, webhookOverride)
+        DiscordWebhookClient.postReport(name, uuid, null, embed, pngImage, filename, webhookOverride,
+                        content, List.of())
                 .thenAccept(ref -> {
                     if (ref != null) {
                         reverse.put(ref.messageId(), uuid);
@@ -1049,13 +1078,28 @@ public final class DiscordService {
     public void postReportTopLevel(ServerPlayer player, String title, String description,
                                    List<DeathField> fields, byte[] pngImage, String filename, int color,
                                    String webhookOverride) {
+        postReportTopLevel(player, title, description, fields, pngImage, filename, color, webhookOverride, null);
+    }
+
+    /**
+     * As {@link #postReportTopLevel(ServerPlayer, String, String, List, byte[], String, int, String)} plus
+     * a {@code content} line.
+     *
+     * <p>{@code content} is an optional plain-text line posted above the embed (null/blank = none). It
+     * never pings on its own — {@code allowed_mentions.users} stays empty — but a relay may resolve
+     * markers in it (Dungeon Train's {@code <dt-ping:uuid>} → a ping for a Discord-linked player).</p>
+     */
+    public void postReportTopLevel(ServerPlayer player, String title, String description,
+                                   List<DeathField> fields, byte[] pngImage, String filename, int color,
+                                   String webhookOverride, String content) {
         if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
         UUID uuid = player.getUUID();
         String name = player.getGameProfile().getName();
         JsonObject embed = buildReportEmbed(title, description, fields, color);
-        DiscordWebhookClient.postReport(name, uuid, null, embed, pngImage, filename, webhookOverride)
+        DiscordWebhookClient.postReport(name, uuid, null, embed, pngImage, filename, webhookOverride,
+                        content, List.of())
                 .thenAccept(ref -> {
                     if (ref != null) {
                         reverse.put(ref.messageId(), uuid);
@@ -1264,12 +1308,12 @@ public final class DiscordService {
      */
     private void postReport(ServerPlayer player, String title, String description,
                             List<DeathField> fields, List<ItemStack> iconItems, int color) {
-        postReport(player, title, description, fields, iconItems, color, false, null);
+        postReport(player, title, description, fields, iconItems, color, false, null, null);
     }
 
     private void postReport(ServerPlayer player, String title, String description,
                             List<DeathField> fields, List<ItemStack> iconItems, int color, boolean topLevel,
-                            String webhookOverride) {
+                            String webhookOverride, String content) {
         if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
@@ -1289,7 +1333,8 @@ public final class DiscordService {
                     LOGGER.warn("Report image compose failed: {}", t.toString());
                     return null;
                 })
-                .thenCompose(png -> DiscordWebhookClient.postReport(name, uuid, threadId, embed, png, "report.png", webhookOverride))
+                .thenCompose(png -> DiscordWebhookClient.postReport(name, uuid, threadId, embed, png, "report.png",
+                        webhookOverride, content, List.of()))
                 .thenAccept(ref -> {
                     if (ref != null) {
                         reverse.put(ref.messageId(), uuid);
