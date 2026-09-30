@@ -1172,11 +1172,11 @@ public final class DiscordService {
         if (!DiscordPresenceConfig.isSurveyResultsCopyEnabled()) {
             return;
         }
-        JsonObject embed = withFooter(buildReportEmbed(title, description, fields,
-                DiscordPresenceConfig.getSurveyEmbedColor()), DiscordCredentials.providerSurveyEmbedFooter());
+        JsonObject embed = buildReportEmbed(title, description, fields, DiscordPresenceConfig.getSurveyEmbedColor());
         String link = SurveyJumpLink.url(DiscordPresenceConfig.getSurveyResultsLinkGuildId(),
                 original.channelId(), original.messageId());
-        String content = SurveyJumpLink.content(link);
+        // The footer text rides on the jump-link line here (small subtext) instead of the embed footer.
+        String content = SurveyJumpLink.content(link, DiscordCredentials.providerSurveyEmbedFooter());
         String dest = DiscordPresenceConfig.getSurveyResultsWebhookUrl(); // blank → default webhook (postReport handles it)
         DiscordWebhookClient.postReport(name, uuid, null, embed, null, null, dest, content, List.of())
                 .thenAccept(ref -> {
