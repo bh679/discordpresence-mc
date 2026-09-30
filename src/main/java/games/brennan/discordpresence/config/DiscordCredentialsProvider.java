@@ -255,8 +255,8 @@ public interface DiscordCredentialsProvider {
     }
 
     /**
-     * Optional tiny footer line stamped on every survey-style embed (genuine answers, their
-     * survey-results copy, and the {@code postSurveyResponse} notices) — e.g. a bundling mod's
+     * Optional tiny footer line stamped on genuine survey answers ({@code postSurveyAnswer}) and
+     * their survey-results copy — never on the {@code postSurveyResponse} notices — e.g. a bundling mod's
      * version, so feedback can be tied to a build. Rendered as the embed footer, Discord's smallest
      * embed text. Blank/{@code null} = no footer (standalone DP unchanged). Default blank.
      */

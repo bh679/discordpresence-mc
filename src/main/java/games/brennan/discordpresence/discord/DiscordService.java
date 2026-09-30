@@ -1134,8 +1134,11 @@ public final class DiscordService {
         }
         UUID uuid = player.getUUID();
         String name = player.getGameProfile().getName();
-        JsonObject embed = withFooter(buildReportEmbed(title, description, fields,
-                DiscordPresenceConfig.getSurveyEmbedColor()), DiscordCredentials.providerSurveyEmbedFooter());
+        JsonObject embed = buildReportEmbed(title, description, fields, DiscordPresenceConfig.getSurveyEmbedColor());
+        if (copyToResultsChannel) {
+            // Footer only on genuine answers, never on the embed-style notices that reuse this path.
+            embed = withFooter(embed, DiscordCredentials.providerSurveyEmbedFooter());
+        }
         String threadId = threadStore.threadId(uuid); // into the player's thread when they have one (null → top-level)
         String pingContent = surveyPingContent(pingUserIds);
         DiscordWebhookClient.postReport(name, uuid, threadId, embed, null, null, null, pingContent, pingUserIds)
