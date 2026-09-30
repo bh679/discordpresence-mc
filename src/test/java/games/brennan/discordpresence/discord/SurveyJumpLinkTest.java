@@ -36,4 +36,16 @@ class SurveyJumpLinkTest {
         assertNull(SurveyJumpLink.content(""));
         assertNull(SurveyJumpLink.content("   "));
     }
+
+    @Test
+    void content_withTag_leadsWithTagAsSubtext() {
+        assertEquals("-# DT 0.1075.2 · 🧵 Originally posted in the player's thread → https://discord.com/channels/1/2/3",
+                SurveyJumpLink.content("https://discord.com/channels/1/2/3", " DT 0.1075.2 "));
+    }
+
+    @Test
+    void content_tagWithoutLink_isJustTheTag() {
+        assertEquals("-# DT 0.1075.2", SurveyJumpLink.content(null, "DT 0.1075.2"));
+        assertNull(SurveyJumpLink.content("", " "));
+    }
 }

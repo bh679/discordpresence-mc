@@ -299,6 +299,11 @@ public final class DiscordCredentials {
         return read(DiscordCredentialsProvider::surveyResultsLinkGuildId);
     }
 
+    /** The provider's survey-embed footer text, or {@code ""} when none / it fails. */
+    public static String providerSurveyEmbedFooter() {
+        return read(DiscordCredentialsProvider::surveyEmbedFooter);
+    }
+
     /**
      * The provider's extra advancement message-suffix line for this player / advancement, or {@code ""}
      * when none is registered / it fails. Reuses {@link #read}'s null- and throwable-safe contract.

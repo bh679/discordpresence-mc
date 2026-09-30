@@ -38,10 +38,21 @@ final class SurveyJumpLink {
      * {@code jumpUrl} is blank (no link available → post the copy with no content body).
      */
     static String content(String jumpUrl) {
+        return content(jumpUrl, null);
+    }
+
+    /**
+     * As {@link #content(String)}, but leads with {@code tag} (e.g. a bundling mod's version) and
+     * renders the whole line as Discord subtext ({@code -# }) so it stays small. With a tag but no
+     * link, the line is just the tag; with neither, {@code null}.
+     */
+    static String content(String jumpUrl, String tag) {
+        boolean hasTag = !isBlank(tag);
         if (isBlank(jumpUrl)) {
-            return null;
+            return hasTag ? "-# " + tag.strip() : null;
         }
-        return "🧵 Originally posted in the player's thread → " + jumpUrl;
+        String line = "🧵 Originally posted in the player's thread → " + jumpUrl;
+        return hasTag ? "-# " + tag.strip() + " · " + line : line;
     }
 
     private static boolean isBlank(String s) {

@@ -1135,6 +1135,10 @@ public final class DiscordService {
         UUID uuid = player.getUUID();
         String name = player.getGameProfile().getName();
         JsonObject embed = buildReportEmbed(title, description, fields, DiscordPresenceConfig.getSurveyEmbedColor());
+        if (copyToResultsChannel) {
+            // Footer only on genuine answers, never on the embed-style notices that reuse this path.
+            embed = withFooter(embed, DiscordCredentials.providerSurveyEmbedFooter());
+        }
         String threadId = threadStore.threadId(uuid); // into the player's thread when they have one (null → top-level)
         String pingContent = surveyPingContent(pingUserIds);
         DiscordWebhookClient.postReport(name, uuid, threadId, embed, null, null, null, pingContent, pingUserIds)
@@ -1171,7 +1175,8 @@ public final class DiscordService {
         JsonObject embed = buildReportEmbed(title, description, fields, DiscordPresenceConfig.getSurveyEmbedColor());
         String link = SurveyJumpLink.url(DiscordPresenceConfig.getSurveyResultsLinkGuildId(),
                 original.channelId(), original.messageId());
-        String content = SurveyJumpLink.content(link);
+        // The footer text rides on the jump-link line here (small subtext) instead of the embed footer.
+        String content = SurveyJumpLink.content(link, DiscordCredentials.providerSurveyEmbedFooter());
         String dest = DiscordPresenceConfig.getSurveyResultsWebhookUrl(); // blank → default webhook (postReport handles it)
         DiscordWebhookClient.postReport(name, uuid, null, embed, null, null, dest, content, List.of())
                 .thenAccept(ref -> {
@@ -1305,6 +1310,21 @@ public final class DiscordService {
      * Build the death-report embed JSON (title, description, colour, inline fields).
      * Pure (colour passed in) so it is unit-testable without a loaded config.
      */
+    /**
+     * Returns {@code embed} with a Discord {@code footer} of {@code text} added (the smallest embed
+     * text), or {@code embed} unchanged when {@code text} is blank/null. Mutates only the freshly
+     * built embed it is handed, which no caller shares.
+     */
+    static JsonObject withFooter(JsonObject embed, String text) {
+        if (text == null || text.isBlank()) {
+            return embed;
+        }
+        JsonObject footer = new JsonObject();
+        footer.addProperty("text", text.strip());
+        embed.add("footer", footer);
+        return embed;
+    }
+
     static JsonObject buildReportEmbed(String title, String description, List<DeathField> fields, int color) {
         JsonObject embed = new JsonObject();
         if (title != null && !title.isBlank()) {

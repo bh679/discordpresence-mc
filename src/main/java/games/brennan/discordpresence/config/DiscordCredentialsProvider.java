@@ -253,4 +253,14 @@ public interface DiscordCredentialsProvider {
     default String surveyResultsLinkGuildId() {
         return "";
     }
+
+    /**
+     * Optional tiny tag stamped on genuine survey answers ({@code postSurveyAnswer}) — never on the
+     * {@code postSurveyResponse} notices — e.g. a bundling mod's version, so feedback can be tied to a
+     * build. The threaded answer shows it as the embed footer; the survey-results copy shows it at the
+     * start of its small (subtext) "originally posted" jump-link line. Blank/{@code null} = no footer (standalone DP unchanged). Default blank.
+     */
+    default String surveyEmbedFooter() {
+        return "";
+    }
 }
