@@ -304,6 +304,11 @@ public final class DiscordCredentials {
         return read(DiscordCredentialsProvider::surveyEmbedFooter);
     }
 
+    /** The provider's survey-embed footer text for this player, or {@code ""} when none / it fails. */
+    public static String providerSurveyEmbedFooter(UUID playerId, String clientLanguage) {
+        return read(p -> p.surveyEmbedFooter(playerId, clientLanguage));
+    }
+
     /**
      * The provider's extra advancement message-suffix line for this player / advancement, or {@code ""}
      * when none is registered / it fails. Reuses {@link #read}'s null- and throwable-safe contract.

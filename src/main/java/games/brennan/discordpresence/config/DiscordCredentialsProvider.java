@@ -263,4 +263,15 @@ public interface DiscordCredentialsProvider {
     default String surveyEmbedFooter() {
         return "";
     }
+
+    /**
+     * Per-player form of {@link #surveyEmbedFooter()}, for a tag that says something about the
+     * answering player as well as the build (their language, how much they have played). Called on
+     * the server thread, once per answer; the result is reused for both the threaded footer and the
+     * survey-results copy. {@code clientLanguage} is the player's client locale code (e.g.
+     * {@code en_us}), blank when unknown. Defaults to the player-less tag.
+     */
+    default String surveyEmbedFooter(UUID playerId, String clientLanguage) {
+        return surveyEmbedFooter();
+    }
 }

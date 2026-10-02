@@ -38,9 +38,16 @@ class SurveyJumpLinkTest {
     }
 
     @Test
-    void content_withTag_leadsWithTagAsSubtext() {
-        assertEquals("-# DT 0.1075.2 · 🧵 Originally posted in the player's thread → https://discord.com/channels/1/2/3",
+    void content_withTag_isTagThenLinkAsSubtext() {
+        assertEquals("-# DT 0.1075.2 → https://discord.com/channels/1/2/3",
                 SurveyJumpLink.content("https://discord.com/channels/1/2/3", " DT 0.1075.2 "));
+    }
+
+    @Test
+    void content_withMultiPartTag_keepsTheTagVerbatim() {
+        assertEquals("-# 🟠 DT 0.1093.0 · ru_ru · Mods: 87 · Games 12 → https://discord.com/channels/1/2/3",
+                SurveyJumpLink.content("https://discord.com/channels/1/2/3",
+                        "🟠 DT 0.1093.0 · ru_ru · Mods: 87 · Games 12"));
     }
 
     @Test
