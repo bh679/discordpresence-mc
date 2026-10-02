@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -35,10 +36,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * always comes back {@code null}. {@link #MOD_FILE} asks FML for the sibling's
  * mod file instead, which needs no compile-time dependency on the sibling.
  *
- * <p>Reserving a fixed band (rather than tracking each sibling's exact height)
- * <strong>guarantees no overlap</strong> at the cost of a small gap when the
- * sibling above is collapsed to one line. {@link #RESERVED_LINES} is sized to a
- * sibling's realistic maximum block; tune it there if a sibling grows taller.
+ * <p>Two placements. On the <b>title screen</b> a sibling above shows one
+ * version line, so we sit one line down ({@link #titleStartY}). <b>In-game</b>
+ * the block above grows and shrinks, so we sit directly under where it ends
+ * this frame when {@link DungeonTrainHudSeam} can measure it, and otherwise
+ * below a fixed band of {@link #RESERVED_LINES} per drawing sibling — a gap
+ * rather than an overlap ({@link #inGameStartY}).
  *
  * <p>The branch lookup is injectable ({@link BranchLookup}) so the offset math
  * is unit-testable without a running client; production uses {@link #MOD_FILE}.
@@ -63,10 +66,17 @@ public final class DevHudStack {
     /** Top margin in px — matches Dungeon Train's {@code y = 4} anchor. */
     static final int TOP_MARGIN = 4;
 
+    /** Px between a sibling's title-screen version line and ours (DT's is 10 px tall). */
+    static final int TITLE_LINE_GAP = 2;
+
+    /** Px between the measured bottom of the HUD above us and our first line. */
+    static final int STACK_GAP = 1;
+
     /**
-     * Lines reserved per drawing sibling ranked above us. Sized to a sibling's
-     * realistic max block: DT peaks at 6 lines, each one px taller than ours
-     * (title, Diff-Car, Diff-Level, Time, Travel, group gap).
+     * In-game fallback when the HUD above cannot be measured: lines reserved per
+     * drawing sibling ranked above us. Sized to a sibling's realistic max block —
+     * DT peaks at 6 lines, each one px taller than ours (title, Diff-Car,
+     * Diff-Level, Time, Travel, group gap).
      */
     static final int RESERVED_LINES = 7;
 
@@ -96,14 +106,50 @@ public final class DevHudStack {
         return count;
     }
 
-    /** Top-left Y (px) where our HUD block should start, for the given font line height. */
-    static int startY(BranchLookup lookup, int lineHeight) {
+    /** Count of HUD mods ranked above us that are loaded at all, whatever branch they were built from. */
+    static int presentSiblingsAbove(BranchLookup lookup) {
+        int count = 0;
+        for (String id : HUD_ORDER) {
+            if (id.equals(DiscordPresence.MOD_ID)) {
+                break;
+            }
+            if (lookup.branchOf(id) != null) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Top-left Y (px) on the title screen. A sibling above us shows a single
+     * version line there on every build, release included, so each one that is
+     * loaded takes exactly one line.
+     */
+    static int titleStartY(BranchLookup lookup, int lineHeight) {
+        return TOP_MARGIN + presentSiblingsAbove(lookup) * (lineHeight + TITLE_LINE_GAP);
+    }
+
+    /** Convenience for the overlay: {@link #titleStartY(BranchLookup, int)} via the real mod-file lookup. */
+    public static int titleStartY(int lineHeight) {
+        return titleStartY(MOD_FILE, lineHeight);
+    }
+
+    /**
+     * Top-left Y (px) in-game. {@code liveStart} is the first free Y under the
+     * HUD above us this frame, when it could be measured (see
+     * {@link DungeonTrainHudSeam}); without it we fall back to a fixed band per
+     * drawing sibling.
+     */
+    static int inGameStartY(OptionalInt liveStart, BranchLookup lookup, int lineHeight) {
+        if (liveStart.isPresent()) {
+            return liveStart.getAsInt();
+        }
         return TOP_MARGIN + drawingSiblingsAbove(lookup) * RESERVED_LINES * lineHeight;
     }
 
-    /** Convenience for the overlay: {@link #startY(BranchLookup, int)} via the real mod-file lookup. */
-    public static int startY(int lineHeight) {
-        return startY(MOD_FILE, lineHeight);
+    /** Convenience for the overlay: {@link #inGameStartY(OptionalInt, BranchLookup, int)} via the real mod-file lookup. */
+    public static int inGameStartY(OptionalInt liveStart, int lineHeight) {
+        return inGameStartY(liveStart, MOD_FILE, lineHeight);
     }
 
     private static boolean isDrawing(String branch) {
