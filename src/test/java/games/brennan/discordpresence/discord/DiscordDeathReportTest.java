@@ -170,6 +170,18 @@ class DiscordDeathReportTest {
         assertEquals("<@1>", DiscordService.surveyPingContent(List.of("1")));
     }
 
+    /** The top-level ping overload rides the same root as the survey ping: content + trusted allow-list. */
+    @Test
+    void topLevelPingRootCarriesMentionAndAllowList() {
+        List<String> ids = List.of("342110421114945537");
+        JsonObject root = DiscordWebhookClient.buildReportRoot("Steve", UUID.randomUUID(), new JsonObject(),
+                DiscordService.surveyPingContent(ids), ids);
+        assertEquals("<@342110421114945537>", root.get("content").getAsString());
+        JsonObject am = root.getAsJsonObject("allowed_mentions");
+        assertTrue(am.getAsJsonArray("parse").isEmpty());
+        assertEquals("342110421114945537", am.getAsJsonArray("users").get(0).getAsString());
+    }
+
     @Test
     void surveyPingContentNullWhenNoUsableIds() {
         assertNull(DiscordService.surveyPingContent(List.of()));
