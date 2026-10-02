@@ -81,25 +81,37 @@ tasks.named('test', Test).configure {
 }
 
 // Resolve the current git branch at configuration time so it can be baked into
-// the jar via processResources (discordpresence_version.properties). Falls back
-// to the short SHA on detached HEAD.
+// the jar via processResources (discordpresence_version.properties).
 //
-// Strict branch-ref detection: only the literal `main` ref counts as a release
-// build. Worktrees / feature branches bake their own branch name and therefore
-// show the dev HUD (see client/VersionHudOverlay). The branch ref — not the
-// commit hash — is the dev-vs-release signal.
+// The literal `main` is the release signal; anything else is a dev build and
+// shows the dev HUD (see client/VersionHudOverlay). Worktrees / feature branches
+// bake their own branch name. A detached HEAD bakes `main` when its commit is
+// already on main — a release built from a tag or a raw SHA is still a release —
+// and the short SHA only when it is not (work that has not landed).
+// `-PgitBranch=<name>` overrides the lot, so release.yml never depends on how
+// the checkout happens to be set up.
 def gitBranch = { ->
+    def override = project.findProperty('gitBranch')?.toString()?.trim()
+    if (override) {
+        return override
+    }
     try {
-        def proc = ['git', 'rev-parse', '--abbrev-ref', 'HEAD']
-                .execute(null, project.projectDir)
-        proc.waitForOrKill(5000)
-        def name = proc.in.text.trim()
+        def git = { List<String> args ->
+            def proc = (['git'] + args).execute(null, project.projectDir)
+            proc.waitForOrKill(5000)
+            return [exit: proc.exitValue(), out: proc.in.text.trim()]
+        }
+        def name = git(['rev-parse', '--abbrev-ref', 'HEAD']).out
         if (name == 'HEAD' || name.isEmpty()) {
-            def p2 = ['git', 'rev-parse', '--short', 'HEAD']
-                    .execute(null, project.projectDir)
-            p2.waitForOrKill(5000)
-            def sha = p2.in.text.trim()
-            return sha ?: 'unknown'
+            // A ref that is missing (shallow clone, no remote) exits non-zero too,
+            // which falls through to the SHA — a visible dev build, never a silent one.
+            def onMain = ['origin/main', 'main'].any { ref ->
+                git(['merge-base', '--is-ancestor', 'HEAD', ref]).exit == 0
+            }
+            if (onMain) {
+                return 'main'
+            }
+            return git(['rev-parse', '--short', 'HEAD']).out ?: 'unknown'
         }
         return name
     } catch (Exception e) {

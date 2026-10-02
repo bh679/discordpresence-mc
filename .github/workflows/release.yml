@@ -65,13 +65,19 @@ jobs:
             echo "prerelease=true" >> "$GITHUB_OUTPUT"   # pre-1.0 = beta
           fi
 
-      - run: ./gradlew build --no-daemon
+      # -PgitBranch=main: a release jar must bake branch=main whatever the checkout
+      # looks like — any other value makes the dev HUD draw for every player.
+      - run: ./gradlew build --no-daemon -PgitBranch=main
 
       - name: Verify the release asset exists
         run: |
           JAR="build/libs/discordpresence-neoforge-${MOD_VERSION}.jar"
           if [ ! -f "$JAR" ]; then
             echo "::error::Expected $JAR not found"; ls -la build/libs/; exit 1
+          fi
+          BAKED=$(unzip -p "$JAR" discordpresence_version.properties | grep '^branch=' | cut -d= -f2 | tr -d '\r')
+          if [ "$BAKED" != "main" ]; then
+            echo "::error::$JAR bakes branch=$BAKED — a release must bake branch=main or it ships the dev HUD"; exit 1
           fi
           echo "Release asset: $JAR"
 
