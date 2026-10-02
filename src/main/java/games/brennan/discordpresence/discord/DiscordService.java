@@ -1135,9 +1135,14 @@ public final class DiscordService {
         UUID uuid = player.getUUID();
         String name = player.getGameProfile().getName();
         JsonObject embed = buildReportEmbed(title, description, fields, DiscordPresenceConfig.getSurveyEmbedColor());
+        // Resolved once, here on the server thread: the results copy below runs in the post's
+        // completion callback and must not reach back into the player.
+        String tag = copyToResultsChannel
+                ? DiscordCredentials.providerSurveyEmbedFooter(uuid, clientLanguage(player))
+                : "";
         if (copyToResultsChannel) {
             // Footer only on genuine answers, never on the embed-style notices that reuse this path.
-            embed = withFooter(embed, DiscordCredentials.providerSurveyEmbedFooter());
+            embed = withFooter(embed, tag);
         }
         String threadId = threadStore.threadId(uuid); // into the player's thread when they have one (null → top-level)
         String pingContent = surveyPingContent(pingUserIds);
@@ -1148,7 +1153,7 @@ public final class DiscordService {
                         if (copyToResultsChannel) {
                             // Also drop a copy into the flat survey-results channel, linking back to this
                             // threaded original. Fires its own async post; its failure can't affect the above.
-                            postSurveyResultsCopy(name, uuid, title, description, fields, ref);
+                            postSurveyResultsCopy(name, uuid, title, description, fields, ref, tag);
                         }
                     }
                 })
@@ -1158,6 +1163,17 @@ public final class DiscordService {
                 });
     }
 
+    /** The player's client locale code (e.g. {@code en_us}), or {@code ""} when it can't be read. */
+    private static String clientLanguage(ServerPlayer player) {
+        try {
+            String language = player.clientInformation().language();
+            return language == null ? "" : language;
+        } catch (RuntimeException e) {
+            LOGGER.debug("Client language unavailable for survey tag: {}", e.toString());
+            return "";
+        }
+    }
+
     /**
      * Best-effort copy of a survey answer into a single flat survey-results channel, in addition to
      * the per-player thread — so all feedback is browsable in one place. No-op unless
@@ -1165,10 +1181,11 @@ public final class DiscordService {
      * instance) top-level to {@code surveyResultsWebhookUrl} (blank → the default webhook), with a
      * jump-link back to {@code original} in the content. Never pings (the threaded answer already did).
      * Runs off the server thread inside the threaded post's completion callback; its own failure is
-     * swallowed so it can never break the primary path.
+     * swallowed so it can never break the primary path. {@code tag} is the footer text the threaded
+     * original carries, resolved by the caller while it was still on the server thread.
      */
     private void postSurveyResultsCopy(String name, UUID uuid, String title, String description,
-                                       List<DeathField> fields, DiscordMessageRef original) {
+                                       List<DeathField> fields, DiscordMessageRef original, String tag) {
         if (!DiscordPresenceConfig.isSurveyResultsCopyEnabled()) {
             return;
         }
@@ -1176,7 +1193,7 @@ public final class DiscordService {
         String link = SurveyJumpLink.url(DiscordPresenceConfig.getSurveyResultsLinkGuildId(),
                 original.channelId(), original.messageId());
         // The footer text rides on the jump-link line here (small subtext) instead of the embed footer.
-        String content = SurveyJumpLink.content(link, DiscordCredentials.providerSurveyEmbedFooter());
+        String content = SurveyJumpLink.content(link, tag);
         String dest = DiscordPresenceConfig.getSurveyResultsWebhookUrl(); // blank → default webhook (postReport handles it)
         DiscordWebhookClient.postReport(name, uuid, null, embed, null, null, dest, content, List.of())
                 .thenAccept(ref -> {

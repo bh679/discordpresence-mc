@@ -43,16 +43,20 @@ final class SurveyJumpLink {
 
     /**
      * As {@link #content(String)}, but leads with {@code tag} (e.g. a bundling mod's version) and
-     * renders the whole line as Discord subtext ({@code -# }) so it stays small. With a tag but no
-     * link, the line is just the tag; with neither, {@code null}.
+     * renders the whole line as Discord subtext ({@code -# }) so it stays small. The tag stands in
+     * for the "originally posted" wording — the line is {@code tag → link} — so a tag carrying
+     * several facts still fits on one line. With a tag but no link, the line is just the tag; with
+     * neither, {@code null}.
      */
     static String content(String jumpUrl, String tag) {
         boolean hasTag = !isBlank(tag);
         if (isBlank(jumpUrl)) {
             return hasTag ? "-# " + tag.strip() : null;
         }
-        String line = "🧵 Originally posted in the player's thread → " + jumpUrl;
-        return hasTag ? "-# " + tag.strip() + " · " + line : line;
+        if (hasTag) {
+            return "-# " + tag.strip() + " → " + jumpUrl;
+        }
+        return "🧵 Originally posted in the player's thread → " + jumpUrl;
     }
 
     private static boolean isBlank(String s) {
