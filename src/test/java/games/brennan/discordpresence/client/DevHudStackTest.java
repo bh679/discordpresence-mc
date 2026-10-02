@@ -3,9 +3,16 @@ package games.brennan.discordpresence.client;
 import games.brennan.discordpresence.client.DevHudStack.BranchLookup;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * Tests the dev-HUD stacking math — that Discord Presence reserves a band only
@@ -24,6 +31,38 @@ class DevHudStackTest {
 
     private static int expectedStartY(int siblingsAbove) {
         return DevHudStack.TOP_MARGIN + siblingsAbove * DevHudStack.RESERVED_LINES * LINE_HEIGHT;
+    }
+
+    private static InputStream properties(String text) {
+        return new ByteArrayInputStream(text.getBytes(StandardCharsets.ISO_8859_1));
+    }
+
+    @Test
+    void readBranch_returnsBakedBranch() throws IOException {
+        assertEquals("dev/hud-stack",
+                DevHudStack.readBranch(properties("version=0.60.1\nbranch=dev/hud-stack\n")));
+    }
+
+    @Test
+    void readBranch_withoutBranchKey_isNull() throws IOException {
+        assertNull(DevHudStack.readBranch(properties("version=0.60.1\n")));
+    }
+
+    @Test
+    void memoized_resolvesEachModOnce() {
+        List<String> asked = new ArrayList<>();
+        BranchLookup counting = modId -> {
+            asked.add(modId);
+            return "dungeontrain".equals(modId) ? "dev/a" : null;
+        };
+        BranchLookup memoized = DevHudStack.memoized(counting);
+
+        for (int frame = 0; frame < 3; frame++) {
+            assertEquals("dev/a", memoized.branchOf("dungeontrain"));
+            assertNull(memoized.branchOf("playermob")); // a null result is cached too
+        }
+
+        assertEquals(List.of("dungeontrain", "playermob"), asked);
     }
 
     @Test
