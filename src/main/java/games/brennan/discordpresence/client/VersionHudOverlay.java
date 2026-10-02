@@ -21,8 +21,8 @@ import org.slf4j.Logger;
  * layer) and on the <b>title screen</b> (a screen-render hook) — and nothing on
  * a {@code main} release build, so a dev build is always visually obvious.
  *
- * <p>Positioned via {@link DevHudStack} so it stacks below any sibling mod's dev
- * HUD (e.g. Dungeon Train, which bundles this mod) instead of overlapping it.
+ * <p>Positioned via {@link DevHudStack} so it sits directly under any sibling
+ * mod's dev HUD (e.g. Dungeon Train, which bundles this mod) instead of on it.
  * Respects F1 (hideGui) in-game; F3 debug draws over it, which is intentional.
  */
 @EventBusSubscriber(
@@ -43,7 +43,8 @@ public final class VersionHudOverlay {
             if (mc.options.hideGui) {
                 return;
             }
-            draw(graphics, mc.font);
+            Font font = mc.font;
+            draw(graphics, font, DevHudStack.inGameStartY(DungeonTrainHudSeam.nextFreeY(mc, font), font.lineHeight));
         };
 
         event.registerAboveAll(
@@ -58,19 +59,19 @@ public final class VersionHudOverlay {
         if (!(event.getScreen() instanceof TitleScreen)) {
             return;
         }
-        draw(event.getGuiGraphics(), Minecraft.getInstance().font);
+        Font font = Minecraft.getInstance().font;
+        draw(event.getGuiGraphics(), font, DevHudStack.titleStartY(font.lineHeight));
     }
 
     /**
-     * Draws the dev label top-left, stacked below sibling HUDs. Shared by the
-     * in-game layer and the title screen. Early-returns on {@code main} (release
+     * Draws the dev label top-left at {@code startY}. Shared by the in-game
+     * layer and the title screen. Early-returns on {@code main} (release
      * builds), where the version/branch label is dev-only noise.
      */
-    private static void draw(GuiGraphics graphics, Font font) {
+    private static void draw(GuiGraphics graphics, Font font, int startY) {
         if ("main".equals(VersionInfo.BRANCH)) {
             return;
         }
-        int startY = DevHudStack.startY(font.lineHeight);
         graphics.drawString(font, VersionInfo.DISPLAY, 4, startY, 0xFFFFFFFF, true);
     }
 }

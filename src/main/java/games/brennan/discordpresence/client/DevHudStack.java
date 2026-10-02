@@ -1,11 +1,21 @@
 package games.brennan.discordpresence.client;
 
+import com.mojang.logging.LogUtils;
 import games.brennan.discordpresence.DiscordPresence;
 import net.neoforged.fml.ModList;
+import net.neoforged.neoforgespi.language.IModFileInfo;
+import org.slf4j.Logger;
 
+import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Decides where Discord Presence's top-left dev HUD starts so it stacks
@@ -15,20 +25,30 @@ import java.util.Properties;
  * draws its own dev HUD in the top-left. DP cannot read DT's live, per-frame
  * line count across the mod boundary — but every sibling that adopts this
  * convention bakes a {@code <modid>_version.properties} ({@code version} +
- * {@code branch}) into its jar, all of which land on the shared runtime
- * classpath. DP reads those to learn which higher-ranked siblings are present
- * <em>and</em> on a dev branch (i.e. actually drawing), and reserves a fixed
- * band per such sibling.
+ * {@code branch}) into its jar. DP reads those to learn which higher-ranked
+ * siblings are present <em>and</em> on a dev branch (i.e. actually drawing), and
+ * reserves a fixed band per such sibling.
  *
- * <p>Reserving a fixed band (rather than tracking each sibling's exact height)
- * <strong>guarantees no overlap</strong> at the cost of a small gap when the
- * sibling above is collapsed to one line. {@link #RESERVED_LINES} is sized to a
- * sibling's realistic maximum block; tune it there if a sibling grows taller.
+ * <p><b>The sibling's file is read through its mod file, not the classpath.</b>
+ * NeoForge loads every mod as its own named Java module, and
+ * {@link Class#getResourceAsStream} from a class in a named module searches only
+ * that module — so asking a DP class for {@code /dungeontrain_version.properties}
+ * always comes back {@code null}. {@link #MOD_FILE} asks FML for the sibling's
+ * mod file instead, which needs no compile-time dependency on the sibling.
+ *
+ * <p>Two placements. On the <b>title screen</b> a sibling above shows one
+ * version line, so we sit one line down ({@link #titleStartY}). <b>In-game</b>
+ * the block above grows and shrinks, so we sit directly under where it ends
+ * this frame when {@link DungeonTrainHudSeam} can measure it, and otherwise
+ * below a fixed band of {@link #RESERVED_LINES} per drawing sibling — a gap
+ * rather than an overlap ({@link #inGameStartY}).
  *
  * <p>The branch lookup is injectable ({@link BranchLookup}) so the offset math
- * is unit-testable without a running client; production uses {@link #CLASSPATH}.
+ * is unit-testable without a running client; production uses {@link #MOD_FILE}.
  */
 public final class DevHudStack {
+
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     /**
      * Mods that may draw a top-left dev HUD, highest-first. Index 0 owns the
@@ -46,11 +66,19 @@ public final class DevHudStack {
     /** Top margin in px — matches Dungeon Train's {@code y = 4} anchor. */
     static final int TOP_MARGIN = 4;
 
+    /** Px between a sibling's title-screen version line and ours (DT's is 10 px tall). */
+    static final int TITLE_LINE_GAP = 2;
+
+    /** Px between the measured bottom of the HUD above us and our first line. */
+    static final int STACK_GAP = 1;
+
     /**
-     * Lines reserved per drawing sibling ranked above us. Sized to a sibling's
-     * realistic max block (DT peaks at ~4 lines with debug flags on).
+     * In-game fallback when the HUD above cannot be measured: lines reserved per
+     * drawing sibling ranked above us. Sized to a sibling's realistic max block —
+     * DT peaks at 6 lines, each one px taller than ours (title, Diff-Car,
+     * Diff-Level, Time, Travel, group gap).
      */
-    static final int RESERVED_LINES = 5;
+    static final int RESERVED_LINES = 7;
 
     /** Resolves a mod-id to its baked git branch, or {@code null} if absent / unreadable. */
     @FunctionalInterface
@@ -78,38 +106,97 @@ public final class DevHudStack {
         return count;
     }
 
-    /** Top-left Y (px) where our HUD block should start, for the given font line height. */
-    static int startY(BranchLookup lookup, int lineHeight) {
+    /** Count of HUD mods ranked above us that are loaded at all, whatever branch they were built from. */
+    static int presentSiblingsAbove(BranchLookup lookup) {
+        int count = 0;
+        for (String id : HUD_ORDER) {
+            if (id.equals(DiscordPresence.MOD_ID)) {
+                break;
+            }
+            if (lookup.branchOf(id) != null) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Top-left Y (px) on the title screen. A sibling above us shows a single
+     * version line there on every build, release included, so each one that is
+     * loaded takes exactly one line.
+     */
+    static int titleStartY(BranchLookup lookup, int lineHeight) {
+        return TOP_MARGIN + presentSiblingsAbove(lookup) * (lineHeight + TITLE_LINE_GAP);
+    }
+
+    /** Convenience for the overlay: {@link #titleStartY(BranchLookup, int)} via the real mod-file lookup. */
+    public static int titleStartY(int lineHeight) {
+        return titleStartY(MOD_FILE, lineHeight);
+    }
+
+    /**
+     * Top-left Y (px) in-game. {@code liveStart} is the first free Y under the
+     * HUD above us this frame, when it could be measured (see
+     * {@link DungeonTrainHudSeam}); without it we fall back to a fixed band per
+     * drawing sibling.
+     */
+    static int inGameStartY(OptionalInt liveStart, BranchLookup lookup, int lineHeight) {
+        if (liveStart.isPresent()) {
+            return liveStart.getAsInt();
+        }
         return TOP_MARGIN + drawingSiblingsAbove(lookup) * RESERVED_LINES * lineHeight;
     }
 
-    /** Convenience for the overlay: {@link #startY(BranchLookup, int)} via the real classpath lookup. */
-    public static int startY(int lineHeight) {
-        return startY(CLASSPATH, lineHeight);
+    /** Convenience for the overlay: {@link #inGameStartY(OptionalInt, BranchLookup, int)} via the real mod-file lookup. */
+    public static int inGameStartY(OptionalInt liveStart, int lineHeight) {
+        return inGameStartY(liveStart, MOD_FILE, lineHeight);
     }
 
     private static boolean isDrawing(String branch) {
         return branch != null && !branch.isBlank() && !"main".equals(branch);
     }
 
+    /** The {@code branch} value of a {@code <modid>_version.properties} stream, or {@code null} if it has none. */
+    static String readBranch(InputStream in) throws IOException {
+        Properties props = new Properties();
+        props.load(in);
+        return props.getProperty("branch");
+    }
+
     /**
-     * Production lookup: reads {@code /<modid>_version.properties} off the shared
-     * classpath, gated on the mod actually being loaded. Best-effort — anything
-     * missing or unreadable resolves to {@code null} (treated as not drawing).
+     * Wraps a lookup so each mod-id is resolved once, {@code null} results
+     * included. A baked branch cannot change while the game runs, and the
+     * overlay asks every frame.
      */
-    static final BranchLookup CLASSPATH = modId -> {
-        if (!ModList.get().isLoaded(modId)) {
-            return null;
-        }
-        try (InputStream in = DevHudStack.class.getResourceAsStream("/" + modId + "_version.properties")) {
-            if (in == null) {
+    static BranchLookup memoized(BranchLookup delegate) {
+        Map<String, Optional<String>> cache = new ConcurrentHashMap<>();
+        return modId -> cache
+                .computeIfAbsent(modId, id -> Optional.ofNullable(delegate.branchOf(id)))
+                .orElse(null);
+    }
+
+    /**
+     * Production lookup: reads {@code <modid>_version.properties} from the root
+     * of the sibling's own mod file. A mod that is not loaded, or that does not
+     * bake the file, resolves to {@code null} (treated as not drawing).
+     */
+    static final BranchLookup MOD_FILE = memoized(modId -> {
+        try {
+            IModFileInfo info = ModList.get().getModFileById(modId);
+            if (info == null) {
                 return null;
             }
-            Properties props = new Properties();
-            props.load(in);
-            return props.getProperty("branch");
+            Path properties = info.getFile().findResource(modId + "_version.properties");
+            if (!Files.isRegularFile(properties)) {
+                return null;
+            }
+            try (InputStream in = Files.newInputStream(properties)) {
+                return readBranch(in);
+            }
         } catch (Exception e) {
+            LOGGER.warn("DevHudStack: could not read the dev branch of '{}' — not reserving HUD space for it",
+                    modId, e);
             return null;
         }
-    };
+    });
 }
