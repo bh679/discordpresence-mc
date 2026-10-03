@@ -1049,13 +1049,32 @@ public final class DiscordService {
     public void postReportTopLevel(ServerPlayer player, String title, String description,
                                    List<DeathField> fields, byte[] pngImage, String filename, int color,
                                    String webhookOverride) {
+        postReportTopLevel(player, title, description, fields, pngImage, filename, color, webhookOverride,
+                List.of());
+    }
+
+    /**
+     * As {@link #postReportTopLevel(ServerPlayer, String, String, List, byte[], String, int, String)} but
+     * also @-mentions {@code pingUserIds}: their ids become the message {@code content} above the embed
+     * and a trusted {@code allowed_mentions.users} allow-list, so they are actually notified — the same
+     * mechanism as the survey-answer ping, now available on a top-level public post. An empty list is
+     * exactly the no-ping overload.
+     *
+     * <p><b>Public API.</b> Dungeon Train uses this for milestone advancements (its capstone and the
+     * one-life distance record): the post lands in the public feed and pings the maintainer.</p>
+     */
+    public void postReportTopLevel(ServerPlayer player, String title, String description,
+                                   List<DeathField> fields, byte[] pngImage, String filename, int color,
+                                   String webhookOverride, List<String> pingUserIds) {
         if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
         UUID uuid = player.getUUID();
         String name = player.getGameProfile().getName();
         JsonObject embed = buildReportEmbed(title, description, fields, color);
-        DiscordWebhookClient.postReport(name, uuid, null, embed, pngImage, filename, webhookOverride)
+        List<String> pingIds = pingUserIds == null ? List.of() : pingUserIds;
+        DiscordWebhookClient.postReport(name, uuid, null, embed, pngImage, filename, webhookOverride,
+                        surveyPingContent(pingIds), pingIds)
                 .thenAccept(ref -> {
                     if (ref != null) {
                         reverse.put(ref.messageId(), uuid);
