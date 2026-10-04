@@ -274,4 +274,15 @@ public interface DiscordCredentialsProvider {
     default String surveyEmbedFooter(UUID playerId, String clientLanguage) {
         return surveyEmbedFooter();
     }
+
+    /**
+     * Per-answer form of {@link #surveyEmbedFooter(UUID, String)}: {@code timesAnswered} is how many
+     * times this player has now answered this particular question, this answer included
+     * ({@code 0} = unknown). This is the form DP actually calls for a genuine survey answer, once per
+     * answer on the server thread. Defaults to the per-player tag, so a provider that ignores the
+     * count is unchanged.
+     */
+    default String surveyEmbedFooter(UUID playerId, String clientLanguage, int timesAnswered) {
+        return surveyEmbedFooter(playerId, clientLanguage);
+    }
 }

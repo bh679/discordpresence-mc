@@ -26,8 +26,9 @@ import java.util.function.Predicate;
  * <p>The client walks the sent questions one screen at a time, submitting each (every submit
  * posts to Discord). The survey is offered fresh on every death and via {@code /feedback}, so
  * a player can give feedback as often as they like. Answered questions are still tracked per
- * player ({@link SurveyStore}) so {@link #record} can fire the survey-completed seam once a
- * player has answered everything.</p>
+ * player ({@link SurveyStore}, which also counts how many times each question was answered)
+ * so {@link #record} can fire the survey-completed seam once a player has answered everything
+ * and tell Discord how many times this player has answered the question.</p>
  */
 public final class SurveyManager {
 
@@ -106,7 +107,7 @@ public final class SurveyManager {
         // No "already answered" guard: the survey re-opens on every death and via /feedback, and
         // every submit posts.
         String cleaned = sanitizeComment(comment);
-        store.markAnswered(uuid, questionId);
+        int timesAnswered = store.markAnswered(uuid, questionId); // including this one
 
         String name = player.getGameProfile().getName();
         List<DeathField> fields = new ArrayList<>();
@@ -128,7 +129,7 @@ public final class SurveyManager {
         // Other reusers of the survey embed style (e.g. DT's Free Play / difficulty notices) call
         // postSurveyResponse instead — they never ping and never produce a results-channel copy.
         DiscordService.get().postSurveyAnswer(player, "📋 Feedback — " + name, question.prompt(), fields,
-                DiscordCredentials.providerSurveyPingUserIds());
+                DiscordCredentials.providerSurveyPingUserIds(), timesAnswered);
 
         // If the player has now answered every question, the survey is complete — notify the
         // bundling mod so it can react (e.g. award an advancement). Fires on each completion;

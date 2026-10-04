@@ -211,6 +211,39 @@ class DiscordCredentialsTest {
     }
 
     @Test
+    void surveyEmbedFooterWithCount_defaultsToPerPlayerTag_nullAndThrowSafe() {
+        UUID player = UUID.randomUUID();
+
+        DiscordCredentials.register(null);
+        assertEquals("", DiscordCredentials.providerSurveyEmbedFooter(player, "en_us", 3));
+
+        // A provider that only knows the per-player form still gets called — the count is dropped.
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String surveyEmbedFooter(UUID id, String lang) { return "DT 1.0 · " + lang; }
+        });
+        assertEquals("DT 1.0 · en_us", DiscordCredentials.providerSurveyEmbedFooter(player, "en_us", 3));
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String surveyEmbedFooter(UUID id, String lang, int times) { return null; }
+        });
+        assertEquals("", DiscordCredentials.providerSurveyEmbedFooter(player, "en_us", 3)); // null → ""
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String surveyEmbedFooter(UUID id, String lang, int times) { throw new RuntimeException("boom"); }
+        });
+        assertEquals("", DiscordCredentials.providerSurveyEmbedFooter(player, "en_us", 3)); // throw → ""
+
+        DiscordCredentials.register(new DiscordCredentialsProvider() {
+            @Override public String webhookUrl() { return ""; }
+            @Override public String surveyEmbedFooter(UUID id, String lang, int times) { return "DT 1.0 · (" + times + ")"; }
+        });
+        assertEquals("DT 1.0 · (3)", DiscordCredentials.providerSurveyEmbedFooter(player, "en_us", 3));
+    }
+
+    @Test
     void advancementSuffix_defaultBlank_nullAndThrowSafe() {
         UUID player = UUID.randomUUID();
 
