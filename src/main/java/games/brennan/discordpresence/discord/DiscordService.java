@@ -1113,7 +1113,7 @@ public final class DiscordService {
      * produces a copy in the survey-results channel.</p>
      */
     public void postSurveyResponse(ServerPlayer player, String title, String description, List<DeathField> fields) {
-        postSurveyResponse(player, title, description, fields, List.of(), false);
+        postSurveyResponse(player, title, description, fields, List.of(), false, 0);
     }
 
     /**
@@ -1124,7 +1124,7 @@ public final class DiscordService {
      */
     public void postSurveyResponse(ServerPlayer player, String title, String description,
                                    List<DeathField> fields, List<String> pingUserIds) {
-        postSurveyResponse(player, title, description, fields, pingUserIds, false);
+        postSurveyResponse(player, title, description, fields, pingUserIds, false, 0);
     }
 
     /**
@@ -1138,16 +1138,28 @@ public final class DiscordService {
      */
     public void postSurveyAnswer(ServerPlayer player, String title, String description,
                                  List<DeathField> fields, List<String> pingUserIds) {
-        postSurveyResponse(player, title, description, fields, pingUserIds, true);
+        postSurveyAnswer(player, title, description, fields, pingUserIds, 0);
+    }
+
+    /**
+     * As {@link #postSurveyAnswer(ServerPlayer, String, String, List, List)}, also saying how many
+     * times this player has now answered this question ({@code timesAnswered}, this answer included;
+     * {@code 0} = unknown). The count reaches the bundling mod through the per-answer footer seam
+     * ({@code surveyEmbedFooter(UUID, String, int)}) so it can show it on the footer / results line.
+     */
+    public void postSurveyAnswer(ServerPlayer player, String title, String description,
+                                 List<DeathField> fields, List<String> pingUserIds, int timesAnswered) {
+        postSurveyResponse(player, title, description, fields, pingUserIds, true, timesAnswered);
     }
 
     /**
      * Shared implementation for the survey embed post. {@code copyToResultsChannel} gates the
-     * survey-results copy so only the genuine answer path ({@link #postSurveyAnswer}) produces one.
+     * survey-results copy so only the genuine answer path ({@link #postSurveyAnswer}) produces one;
+     * {@code timesAnswered} is that path's per-question answer count (0 = unknown / not an answer).
      */
     private void postSurveyResponse(ServerPlayer player, String title, String description,
                                     List<DeathField> fields, List<String> pingUserIds,
-                                    boolean copyToResultsChannel) {
+                                    boolean copyToResultsChannel, int timesAnswered) {
         if (!enabled() || !networkAllowed(player.server)) {
             return;
         }
@@ -1157,7 +1169,7 @@ public final class DiscordService {
         // Resolved once, here on the server thread: the results copy below runs in the post's
         // completion callback and must not reach back into the player.
         String tag = copyToResultsChannel
-                ? DiscordCredentials.providerSurveyEmbedFooter(uuid, clientLanguage(player))
+                ? DiscordCredentials.providerSurveyEmbedFooter(uuid, clientLanguage(player), timesAnswered)
                 : "";
         if (copyToResultsChannel) {
             // Footer only on genuine answers, never on the embed-style notices that reuse this path.

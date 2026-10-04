@@ -310,6 +310,14 @@ public final class DiscordCredentials {
     }
 
     /**
+     * The provider's survey-embed footer text for this player and this answer — {@code timesAnswered}
+     * is how many times they have now answered the question — or {@code ""} when none / it fails.
+     */
+    public static String providerSurveyEmbedFooter(UUID playerId, String clientLanguage, int timesAnswered) {
+        return read(p -> p.surveyEmbedFooter(playerId, clientLanguage, timesAnswered));
+    }
+
+    /**
      * The provider's extra advancement message-suffix line for this player / advancement, or {@code ""}
      * when none is registered / it fails. Reuses {@link #read}'s null- and throwable-safe contract.
      */
