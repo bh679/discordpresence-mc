@@ -14,7 +14,10 @@ import net.minecraft.util.FormattedCharSequence;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 
 /**
@@ -53,6 +56,8 @@ public final class NetworkConsentScreen extends Screen {
     private static final String KEY_FOOTNOTE = "discordpresence.consent.footnote";
     private static final String KEY_ENABLE = "discordpresence.consent.enable";
     private static final String KEY_NOT_NOW = "discordpresence.consent.not_now";
+    private static final String KEY_TOGGLE_ON = "discordpresence.consent.toggle_on";
+    private static final String KEY_TOGGLE_OFF = "discordpresence.consent.toggle_off";
 
     // Flat card geometry.
     private static final int CARD_W = 300;
@@ -63,6 +68,11 @@ public final class NetworkConsentScreen extends Screen {
     private static final int BUTTON_GAP = 8;
     private static final int DOT_INSET = 3;     // dot x offset from inner-left
     private static final int BULLET_TEXT_INSET = 12; // bullet text x offset from inner-left
+    // Switchable provider lines (ConsentBullet#isToggle) draw a small ON/OFF pill in place of the
+    // marker, so their text starts further right. Pill height = font lineHeight + 2, drawn 1px above
+    // the text baseline row so the two centre on each other.
+    private static final int TOGGLE_W = 24;
+    private static final int TOGGLE_TEXT_INSET = TOGGLE_W + 6;
 
     // Section gaps.
     private static final int GAP_TITLE = 9;
@@ -94,6 +104,10 @@ public final class NetworkConsentScreen extends Screen {
     // picked. So the selection is drawn instead, in the card's own accent blue.
     private static final int COLOR_SELECTED_BG = 0xFF3A4A63;
     private static final int COLOR_SELECTED_BORDER = COLOR_DOT;
+    // ON pill reuses the selected-option look; OFF is the same shape in the card's greys.
+    private static final int COLOR_TOGGLE_OFF_BG = 0xFF2A2A30;
+    private static final int COLOR_TOGGLE_OFF_BORDER = 0xFF55555E;
+    private static final int COLOR_TOGGLE_OFF_TEXT = 0xFFA0A0A0;
 
     private final Screen previousScreen;
 
@@ -127,9 +141,13 @@ public final class NetworkConsentScreen extends Screen {
      * option can wrap to a different number of lines and therefore shift everything below it.
      */
     private record LaidOutBullet(List<FormattedCharSequence> lines, boolean on, String tooltip,
-                                 int x, int y, int w, int h) {
+                                 int x, int y, int w, int h, int index, Consumer<Boolean> onToggle) {
         boolean hasTooltipText() {
             return tooltip != null && !tooltip.isBlank();
+        }
+
+        boolean isToggle() {
+            return onToggle != null;
         }
     }
 
@@ -137,6 +155,13 @@ public final class NetworkConsentScreen extends Screen {
     private List<LaidOutBullet> optionBullets = List.of();
     /** The option {@link #optionBullets} was laid out for, so render can notice a toggle and re-init. */
     private int optionBulletsFor = -1;
+    /**
+     * Current ON/OFF state of each switchable provider line, by bullet index, for the option it was
+     * laid out for. Starts from each bullet's {@code on} and survives a resize re-init, but resets when
+     * the player picks a different option: that option's bullets carry their own defaults.
+     */
+    private final Map<Integer, Boolean> toggleStates = new HashMap<>();
+    private int toggleStatesFor = -1;
 
     public NetworkConsentScreen(Screen previousScreen) {
         super(Component.translatable(KEY_TITLE)); // narration title
@@ -231,11 +256,18 @@ public final class NetworkConsentScreen extends Screen {
         int suppliedH = 0;
         if (supplied != null) {
             for (ConsentBullet bullet : supplied) {
-                List<FormattedCharSequence> lines = font.split(Component.literal(bullet.text()), bulletTextWidth);
+                int wrapWidth = bullet.isToggle() ? innerWidth - TOGGLE_TEXT_INSET : bulletTextWidth;
+                List<FormattedCharSequence> lines = font.split(Component.literal(bullet.text()), wrapWidth);
                 suppliedWrapped.add(lines);
                 suppliedH += lines.size() * LINE_STEP + BULLET_GAP;
             }
             if (!suppliedWrapped.isEmpty()) suppliedH -= BULLET_GAP;
+        }
+        // Switch states belong to the option they were shown for; a new option starts from its own
+        // bullets' defaults, a resize keeps whatever the player already flipped.
+        if (toggleStatesFor != choiceIndex) {
+            toggleStates.clear();
+            toggleStatesFor = choiceIndex;
         }
 
         // Label line + the cycle button under it, when a question was supplied.
@@ -282,8 +314,9 @@ public final class NetworkConsentScreen extends Screen {
                 ConsentBullet bullet = supplied.get(i);
                 List<FormattedCharSequence> lines = suppliedWrapped.get(i);
                 int h = lines.size() * LINE_STEP;
-                laid.add(new LaidOutBullet(lines, bullet.on(), bullet.tooltip(),
-                        innerLeft, cursor, innerWidth, h));
+                boolean on = bullet.isToggle() ? toggleStates.getOrDefault(i, bullet.on()) : bullet.on();
+                laid.add(new LaidOutBullet(lines, on, bullet.tooltip(),
+                        innerLeft, cursor, innerWidth, h, i, bullet.onToggle()));
                 cursor += h + BULLET_GAP;
             }
             if (!laid.isEmpty()) cursor -= BULLET_GAP;
@@ -435,14 +468,18 @@ public final class NetworkConsentScreen extends Screen {
         String hovered = null;
         for (LaidOutBullet bullet : optionBullets) {
             int ly = bullet.y();
-            if (bullet.on()) {
+            int textInset = BULLET_TEXT_INSET;
+            if (bullet.isToggle()) {
+                drawTogglePill(graphics, innerLeft, ly, bullet.on());
+                textInset = TOGGLE_TEXT_INSET;
+            } else if (bullet.on()) {
                 int dotY = ly + (font.lineHeight - 3) / 2;
                 graphics.fill(innerLeft + DOT_INSET, dotY, innerLeft + DOT_INSET + 3, dotY + 3, COLOR_DOT);
             } else {
                 graphics.drawString(font, Component.literal("✗"), innerLeft + DOT_INSET - 1, ly, COLOR_NEG, false);
             }
             for (FormattedCharSequence line : bullet.lines()) {
-                graphics.drawString(font, line, innerLeft + BULLET_TEXT_INSET, ly, COLOR_BULLET, false);
+                graphics.drawString(font, line, innerLeft + textInset, ly, COLOR_BULLET, false);
                 ly += LINE_STEP;
             }
             // These are drawn strings, not widgets, so the hover is a manual hit-test against the rect
@@ -473,6 +510,54 @@ public final class NetworkConsentScreen extends Screen {
     private static boolean contains(LaidOutBullet bullet, int mx, int my) {
         return mx >= bullet.x() && mx < bullet.x() + bullet.w()
                 && my >= bullet.y() && my < bullet.y() + bullet.h();
+    }
+
+    /** The ON/OFF pill of a switchable line: flat fill, 1px border, centred label, one text row tall. */
+    private void drawTogglePill(GuiGraphics graphics, int innerLeft, int rowY, boolean on) {
+        int x0 = innerLeft;
+        int y0 = rowY - 1;
+        int x1 = x0 + TOGGLE_W;
+        int y1 = y0 + font.lineHeight + 2;
+        int bg = on ? COLOR_SELECTED_BG : COLOR_TOGGLE_OFF_BG;
+        int border = on ? COLOR_SELECTED_BORDER : COLOR_TOGGLE_OFF_BORDER;
+        graphics.fill(x0, y0, x1, y1, bg);
+        graphics.fill(x0, y0, x1, y0 + 1, border);
+        graphics.fill(x0, y1 - 1, x1, y1, border);
+        graphics.fill(x0, y0, x0 + 1, y1, border);
+        graphics.fill(x1 - 1, y0, x1, y1, border);
+        Component label = Component.translatable(on ? KEY_TOGGLE_ON : KEY_TOGGLE_OFF);
+        graphics.drawCenteredString(font, label, x0 + TOGGLE_W / 2, rowY, on ? COLOR_TITLE : COLOR_TOGGLE_OFF_TEXT);
+    }
+
+    /** Whether {@code (mx, my)} is on a switchable line's pill (its first text row only). */
+    private boolean onPill(LaidOutBullet bullet, double mx, double my) {
+        return bullet.isToggle()
+                && mx >= bullet.x() && mx < bullet.x() + TOGGLE_W
+                && my >= bullet.y() - 1 && my < bullet.y() + font.lineHeight + 1;
+    }
+
+    /**
+     * A click on a switchable line's pill flips it, remembers the new state for this option, and tells
+     * the bundler. The screen's own widgets (option row, confirm button) get the click first.
+     */
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (super.mouseClicked(mouseX, mouseY, button)) return true;
+        if (button != 0) return false;
+        for (LaidOutBullet bullet : optionBullets) {
+            if (!onPill(bullet, mouseX, mouseY)) continue;
+            boolean next = !bullet.on();
+            toggleStates.put(bullet.index(), next);
+            try {
+                bullet.onToggle().accept(next);
+            } catch (Throwable t) {
+                // A misbehaving bundler must not trap the player on the consent card.
+                LOGGER.warn("Consent toggle listener threw; the switch still flipped on screen.", t);
+            }
+            rebuildWidgets();
+            return true;
+        }
+        return false;
     }
 
     /** Esc behaves like "Not now": record DENIED so the prompt is answered, not re-shown. */
