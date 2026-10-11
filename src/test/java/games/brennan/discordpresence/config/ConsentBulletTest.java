@@ -32,6 +32,22 @@ class ConsentBulletTest {
     }
 
     @Test
+    void switchTooltipFollowsThePill() {
+        ConsentBullet b = ConsentBullet.toggle("Livestreaming", false, "shares screen", "off", v -> { });
+        assertEquals("shares screen", b.tooltipFor(true));
+        assertEquals("off", b.tooltipFor(false));
+    }
+
+    @Test
+    void tooltipWithoutAnOffTextIsTheSameInBothStates() {
+        ConsentBullet sw = ConsentBullet.toggle("x", true, "tip", v -> { });
+        assertEquals("tip", sw.tooltipFor(true));
+        assertEquals("tip", sw.tooltipFor(false));
+        ConsentBullet plain = new ConsentBullet("x", false, "tip", null, "ignored");
+        assertEquals("tip", plain.tooltipFor(false));
+    }
+
+    @Test
     void toggleFactoryRefusesANullListener() {
         assertThrows(NullPointerException.class, () -> ConsentBullet.toggle("x", true, null, null));
     }
