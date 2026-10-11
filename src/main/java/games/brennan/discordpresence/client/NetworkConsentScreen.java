@@ -315,7 +315,8 @@ public final class NetworkConsentScreen extends Screen {
                 List<FormattedCharSequence> lines = suppliedWrapped.get(i);
                 int h = lines.size() * LINE_STEP;
                 boolean on = bullet.isToggle() ? toggleStates.getOrDefault(i, bullet.on()) : bullet.on();
-                laid.add(new LaidOutBullet(lines, on, bullet.tooltip(),
+                // A pill click rebuilds the layout, so a switch's hover text follows its new state.
+                laid.add(new LaidOutBullet(lines, on, bullet.tooltipFor(on),
                         innerLeft, cursor, innerWidth, h, i, bullet.onToggle()));
                 cursor += h + BULLET_GAP;
             }

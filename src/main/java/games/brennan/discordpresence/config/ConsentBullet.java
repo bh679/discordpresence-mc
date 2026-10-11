@@ -24,8 +24,17 @@ import java.util.function.Consumer;
  *                 setting, and the pill resets to {@link #on} whenever the card rebuilds its lines (a
  *                 different option picked, a resize), so a bundler that wants defaults per option just
  *                 hands different {@link #on} values per option. {@code null} = plain marker line.
+ * @param tooltipOff optional hover text for a switch while its pill is OFF, or {@code null} to show
+ *                   {@link #tooltip} in both states. Lets a line explain what it shares only once the
+ *                   player has actually turned it on. Ignored on plain marker lines.
  */
-public record ConsentBullet(String text, boolean on, String tooltip, Consumer<Boolean> onToggle) {
+public record ConsentBullet(String text, boolean on, String tooltip, Consumer<Boolean> onToggle,
+                            String tooltipOff) {
+
+    /** A line whose hover text does not change with the switch — the shape before {@link #tooltipOff}. */
+    public ConsentBullet(String text, boolean on, String tooltip, Consumer<Boolean> onToggle) {
+        this(text, on, tooltip, onToggle, null);
+    }
 
     /** A plain marker line with hover text. */
     public ConsentBullet(String text, boolean on, String tooltip) {
@@ -42,9 +51,26 @@ public record ConsentBullet(String text, boolean on, String tooltip, Consumer<Bo
         return new ConsentBullet(text, on, tooltip, Objects.requireNonNull(onToggle, "onToggle"));
     }
 
+    /**
+     * A switchable line whose hover text follows the pill: {@code tooltipOn} while it is ON,
+     * {@code tooltipOff} while it is OFF.
+     */
+    public static ConsentBullet toggle(String text, boolean on, String tooltipOn, String tooltipOff,
+                                       Consumer<Boolean> onToggle) {
+        return new ConsentBullet(text, on, tooltipOn, Objects.requireNonNull(onToggle, "onToggle"), tooltipOff);
+    }
+
     /** True when this line has hover text worth rendering. */
     public boolean hasTooltip() {
         return tooltip != null && !tooltip.isBlank();
+    }
+
+    /**
+     * The hover text to show while the line is in state {@code state}: {@link #tooltipOff} for a switch
+     * that is OFF and has one, otherwise {@link #tooltip}.
+     */
+    public String tooltipFor(boolean state) {
+        return isToggle() && !state && tooltipOff != null ? tooltipOff : tooltip;
     }
 
     /** True when the card should draw this line as a clickable ON/OFF pill. */
