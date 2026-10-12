@@ -29,8 +29,10 @@ import java.util.function.IntConsumer;
  * fallback line, so DP stays generic and hard-codes no host-specific reasons).
  *
  * <p>Either button records the answer in {@link DiscordPresenceClientConfig} and returns to the
- * screen we came from; Esc / {@link #onClose()} behaves like "Not now" so the prompt is answered
- * (DENIED) rather than re-shown. Client-only — never class-loaded on a dedicated server.</p>
+ * screen we came from. Esc does nothing ({@link #shouldCloseOnEsc()}): the card is answered only by
+ * its buttons, so a bundler that reopens it (from an options screen, say) can never have a stray Esc
+ * quietly withdraw a consent the player gave earlier. Client-only — never class-loaded on a dedicated
+ * server.</p>
  *
  * <p>A bundling mod may customise the card through
  * {@link DiscordCredentials#providerNetworkConsentChoice()} (see {@link ConsentChoice}): it adds one
@@ -39,9 +41,9 @@ import java.util.function.IntConsumer;
  * ({@link ConsentChoice#confirmLabel()}). Supply nothing and the card lays out exactly as it always
  * did, so standalone DP and other bundlers are unaffected.</p>
  *
- * <p><b>Note on {@code confirmLabel}.</b> A single confirming button leaves Esc as the only way to
- * decline, which means the refusal still exists but is invisible. That is a deliberate choice for the
- * bundler to make and own — DP neither prevents it nor does it by default.</p>
+ * <p><b>Note on {@code confirmLabel}.</b> With Esc disabled, a single confirming button leaves the card
+ * no way to decline at all — the bundler must offer the refusal elsewhere (an options toggle). That is
+ * a deliberate choice for the bundler to make and own — DP neither prevents it nor does it by default.</p>
  */
 public final class NetworkConsentScreen extends Screen {
 
@@ -561,7 +563,16 @@ public final class NetworkConsentScreen extends Screen {
         return false;
     }
 
-    /** Esc behaves like "Not now": record DENIED so the prompt is answered, not re-shown. */
+    /** Esc does nothing: only the card's buttons answer it (see the class javadoc). */
+    @Override
+    public boolean shouldCloseOnEsc() {
+        return false;
+    }
+
+    /**
+     * Any other close (not Esc, which {@link #shouldCloseOnEsc()} blocks) behaves like "Not now":
+     * record DENIED so the prompt is answered, not re-shown.
+     */
     @Override
     public void onClose() {
         answer(Consent.DENIED);
