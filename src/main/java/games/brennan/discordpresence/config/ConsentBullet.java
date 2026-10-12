@@ -20,7 +20,9 @@ import java.util.function.Consumer;
  *                 normal Minecraft tooltip at the cursor.
  * @param onToggle when non-null the line is a <b>switch</b>: the card draws an ON/OFF pill where the
  *                 marker would be, starting at {@link #on}, and calls this with the new state each time
- *                 the player clicks it (client thread). The card stores nothing — the bundler owns the
+ *                 the player clicks it (client thread), and once more with the state it shows when the
+ *                 card closes (the chosen option's switches only, before that option is reported). The
+ *                 card stores nothing — the bundler owns the
  *                 setting, and the pill resets to {@link #on} whenever the card rebuilds its lines (a
  *                 different option picked, a resize), so a bundler that wants defaults per option just
  *                 hands different {@link #on} values per option. {@code null} = plain marker line.

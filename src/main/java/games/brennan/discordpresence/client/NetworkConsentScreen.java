@@ -390,12 +390,31 @@ public final class NetworkConsentScreen extends Screen {
 
     /** Persist the choice and return to whatever screen we opened over (the title screen). */
     private void answer(Consent consent) {
+        reportFinalToggles();
         reportChoice();
         // Stamp the version on EVERY exit path, including Esc. A player who declines has answered this
         // version; re-asking them next launch would be nagging, not consent.
         DiscordPresenceClientConfig.setConsentVersion(DiscordCredentials.providerNetworkConsentVersion());
         DiscordPresenceClientConfig.setConsent(consent);
         this.minecraft.setScreen(previousScreen);
+    }
+
+    /**
+     * Tell the bundler what every switch of the chosen option shows as the card closes, ahead of the
+     * choice itself. Clicks are reported as they happen too, but a bundler that rebuilds its bullet list
+     * on each re-init can lose that state, and a switch the player never touched is never reported at
+     * all — this way the value the player saw is the value the bundler is handed, for every switch.
+     */
+    private void reportFinalToggles() {
+        if (optionBullets == null || optionBulletsFor != choiceIndex) return;
+        for (LaidOutBullet bullet : optionBullets) {
+            if (bullet.onToggle() == null) continue;
+            try {
+                bullet.onToggle().accept(bullet.on());
+            } catch (Throwable t) {
+                LOGGER.warn("Consent toggle listener threw at close; that switch's state was dropped.", t);
+            }
+        }
     }
 
     /**
