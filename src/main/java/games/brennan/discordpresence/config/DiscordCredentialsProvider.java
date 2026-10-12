@@ -160,6 +160,18 @@ public interface DiscordCredentialsProvider {
     }
 
     /**
+     * Whether the consent card is shown again on every launch while the player has the connection
+     * turned off (consent {@code DENIED}) — still at most once per launch, on the title screen. For a
+     * bundler whose card is the only place the player makes a choice the connection depends on.
+     *
+     * <p>{@code false} (the default) keeps the original behaviour: a decline is remembered and the card
+     * returns only for a never-answered client or a {@link #networkConsentVersion()} bump.</p>
+     */
+    default boolean networkConsentReaskWhenDenied() {
+        return false;
+    }
+
+    /**
      * Per-player veto on the game→Discord chat relay. Returning {@code false} stops that player's chat
      * lines — including ones carrying a {@link #gameRelayMentions()} trigger — from reaching Discord at
      * all. Consulted on the server thread for every relayed line, so keep it cheap.

@@ -242,6 +242,25 @@ public final class DiscordCredentials {
         }
     }
 
+    /**
+     * Whether the provider wants the card re-shown each launch while consent is DENIED, or
+     * {@code false} when none is registered / it fails — so a broken provider can never nag.
+     */
+    public static boolean providerNetworkConsentReaskWhenDenied() {
+        DiscordCredentialsProvider current = provider;
+        if (current == null) {
+            return false;
+        }
+        try {
+            return current.networkConsentReaskWhenDenied();
+        } catch (Throwable t) {
+            if (WARNED.compareAndSet(false, true)) {
+                LOGGER.warn("DiscordCredentialsProvider threw; ignoring its value (this warning is logged once).", t);
+            }
+            return false;
+        }
+    }
+
     /** The provider's presence-track user ids, or an empty list when none is registered / it fails. */
     public static List<String> providerPresenceTrackUserIds() {
         DiscordCredentialsProvider current = provider;
