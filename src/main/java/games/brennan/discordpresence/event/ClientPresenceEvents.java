@@ -38,9 +38,12 @@ public final class ClientPresenceEvents {
         }
         // Due = never answered, OR answered against an older consent version than the bundling mod now
         // asks for (see DiscordCredentialsProvider#networkConsentVersion) — the terms-of-service style
-        // re-ask. Still at most once per launch either way.
-        if (promptedThisLaunch
-                || !DiscordPresenceClientConfig.isConsentDue(DiscordCredentials.providerNetworkConsentVersion())) {
+        // re-ask — OR declined, when the bundler asks for the card back while the connection is off
+        // (DiscordCredentialsProvider#networkConsentReaskWhenDenied). Still at most once per launch.
+        boolean due = DiscordPresenceClientConfig.isConsentDue(DiscordCredentials.providerNetworkConsentVersion())
+                || (DiscordPresenceClientConfig.getConsent() == DiscordPresenceClientConfig.Consent.DENIED
+                        && DiscordCredentials.providerNetworkConsentReaskWhenDenied());
+        if (promptedThisLaunch || !due) {
             return;
         }
         promptedThisLaunch = true;
