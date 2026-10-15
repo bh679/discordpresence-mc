@@ -167,6 +167,23 @@ non-empty, so installs that don't use it are unaffected. In **relay-mode** (the 
 setup) DP holds no local gateway, so the query returns empty unless the relay serves presence — both
 methods are absent-safe, so a consumer degrades gracefully meanwhile.
 
+**Chat-bridge and reaction seams (`games.brennan.discordpresence.compat`).** Static registries a
+bundling mod installs into from its constructor; every handler runs, and a throwing one is logged and
+skipped so it can never break the bridge.
+
+| Seam | Fires | Thread |
+|---|---|---|
+| `InboundDiscordHooks.install(Listener)` | every human inbound Discord message (observer) | gateway |
+| `DiscordCommandHooks.install(Handler)` / `installContext(ContextHandler)` | every human inbound message; return `true` to consume it as a command (no in-game relay). Results OR together. `ContextHandler` receives an `InboundContext` (message id, channel id, author, content, target player) | gateway |
+| `DiscordChatHooks.installPosted(PostedListener)` | after an in-game chat line was posted to Discord — gives its Discord `channelId` + `messageId` and the player's raw text | HTTP/async |
+| `DiscordChatHooks.installDeliverer(InboundDeliverer)` | before DP sends a relayed Discord→game line to its recipient; return `true` to deliver it yourself (DP then skips its own `sendSystemMessage`) | server |
+| `DiscordReactionHooks.install(Listener)` | a reaction on a bridged message changed — a `ReactionSnapshot` with the message's full emoji list (`Reaction(name, id, animated, count, users)`) and the triggering `ReactionEvent` (`add`/`remove`/`clear`) | gateway |
+
+Listeners on the gateway/HTTP threads must hop to the server (or client) thread before touching game
+state. **Reactions are relay-mode only:** the relay forwards `{"type":"reactions",...}` frames on the
+gateway socket (DP ignores any other `type` it doesn't know); a direct bot-token connection does not
+produce reaction snapshots. Message ids are carried in both modes.
+
 ## Build
 
 ```bash
