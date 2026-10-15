@@ -10,6 +10,8 @@ package games.brennan.discordpresence.discord;
  * sets a message-started thread's id equal to its source message id — so a
  * reply <i>and</i> a thread message both resolve against the same
  * {@link PlayerMessageIndex} lookup.</p>
+ *
+ * <p>{@code messageId} is this message's own Discord id (null when the transport didn't carry it).</p>
  */
 record InboundMessage(
         String authorId,
@@ -18,7 +20,14 @@ record InboundMessage(
         boolean bot,
         boolean hasWebhookId,
         String channelId,
-        String referencedMessageId) {
+        String referencedMessageId,
+        String messageId) {
+
+    /** Pre-{@code messageId} shape (message id unknown). */
+    InboundMessage(String authorId, String authorName, String content, boolean bot, boolean hasWebhookId,
+                   String channelId, String referencedMessageId) {
+        this(authorId, authorName, content, bot, hasWebhookId, channelId, referencedMessageId, null);
+    }
 
     /**
      * True when the message came from the bot itself or any webhook — i.e. one of

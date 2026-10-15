@@ -148,6 +148,7 @@ final class GatewayPayloads {
     static InboundMessage message(JsonObject d) {
         String content = strOr(d, "content", "");
         String channelId = str(d, "channel_id");
+        String messageId = str(d, "id");
 
         String authorId = "";
         String authorName = "";
@@ -168,7 +169,8 @@ final class GatewayPayloads {
             referencedMessageId = str(d.getAsJsonObject("message_reference"), "message_id");
         }
 
-        return new InboundMessage(authorId, authorName, content, bot, hasWebhookId, channelId, referencedMessageId);
+        return new InboundMessage(authorId, authorName, content, bot, hasWebhookId, channelId, referencedMessageId,
+                messageId);
     }
 
     /**

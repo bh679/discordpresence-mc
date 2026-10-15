@@ -1,5 +1,8 @@
 package games.brennan.discordpresence.compat;
 
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
+
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -42,7 +45,22 @@ public final class DiscordCommandHooks {
         boolean onCommand(String authorId, String authorName, String content, String targetPlayerUuid, Reply reply);
     }
 
+    /**
+     * Context-carrying variant of {@link Handler}: receives the full {@link InboundContext}
+     * (including the Discord message id and channel id). Same threading and return semantics.
+     */
+    public interface ContextHandler {
+        /**
+         * @param ctx   the inbound message (message id, channel id, author, content, target player)
+         * @param reply posts a plain reply to the same channel
+         * @return {@code true} if this message was a command and was handled (suppress the normal relay)
+         */
+        boolean onCommand(InboundContext ctx, Reply reply);
+    }
+
+    private static final Logger LOGGER = LogUtils.getLogger();
     private static final List<Handler> HANDLERS = new CopyOnWriteArrayList<>();
+    private static final List<ContextHandler> CONTEXT_HANDLERS = new CopyOnWriteArrayList<>();
 
     private DiscordCommandHooks() {}
 
@@ -53,8 +71,38 @@ public final class DiscordCommandHooks {
         }
     }
 
+    /** Register a context handler. No-op for {@code null}. */
+    public static void installContext(ContextHandler handler) {
+        if (handler != null) {
+            CONTEXT_HANDLERS.add(handler);
+        }
+    }
+
     /**
-     * Fire all handlers; called by DiscordPresence's inbound message handler.
+     * Fire every {@link Handler} and {@link ContextHandler}; called by DiscordPresence's inbound
+     * message handler. Every handler runs (no short-circuit); the result is the OR of their returns.
+     *
+     * @return {@code true} if any handler consumed the message (it was a command).
+     */
+    public static boolean fire(InboundContext ctx, Reply reply) {
+        if (ctx == null) {
+            return false;
+        }
+        boolean handled = fire(ctx.authorId(), ctx.authorName(), ctx.content(), ctx.targetPlayerUuid(), reply);
+        for (ContextHandler handler : CONTEXT_HANDLERS) {
+            try {
+                handled |= handler.onCommand(ctx, reply);
+            } catch (Throwable t) {
+                // A misbehaving host handler must never break the chat bridge.
+                LOGGER.warn("DiscordCommandHooks context handler threw", t);
+            }
+        }
+        return handled;
+    }
+
+    /**
+     * Fire the legacy {@link Handler}s only (kept for binary compatibility); prefer
+     * {@link #fire(InboundContext, Reply)}, which also runs {@link ContextHandler}s.
      *
      * @param targetPlayerUuid the Minecraft UUID (as a string) of the player whose thread the message
      *                         is in, or {@code null} when it isn't anchored to a player's thread.
@@ -66,8 +114,9 @@ public final class DiscordCommandHooks {
         for (Handler handler : HANDLERS) {
             try {
                 handled |= handler.onCommand(authorId, authorName, content, targetPlayerUuid, reply);
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
                 // A misbehaving host handler must never break the chat bridge.
+                LOGGER.warn("DiscordCommandHooks handler threw", t);
             }
         }
         return handled;

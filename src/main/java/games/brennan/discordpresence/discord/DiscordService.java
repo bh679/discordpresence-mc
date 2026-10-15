@@ -2,7 +2,9 @@ package games.brennan.discordpresence.discord;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import games.brennan.discordpresence.compat.DiscordChatHooks;
 import games.brennan.discordpresence.compat.DiscordCommandHooks;
+import games.brennan.discordpresence.compat.InboundContext;
 import games.brennan.discordpresence.compat.InboundDiscordHooks;
 import com.mojang.logging.LogUtils;
 import games.brennan.discordpresence.config.DiscordCredentials;
@@ -486,6 +488,9 @@ public final class DiscordService {
             DiscordWebhookClient.postChat(name, uuid, content, threadId, pingIds).thenAccept(ref -> {
                 if (ref != null) {
                     reverse.put(ref.messageId(), uuid);
+                    // Host seam: tell the bundler the Discord id of this line (raw text, not the
+                    // ping-rewritten content) so it can match later reactions to it.
+                    DiscordChatHooks.firePosted(uuid, text, ref.channelId(), ref.messageId());
                 }
             });
         }
@@ -510,6 +515,8 @@ public final class DiscordService {
         // post). Shared by the command seam (so a bundler can scope delivery to that one player)
         // and the relay below; resolving it once keeps the two in lock-step.
         final UUID owner = resolveOwner(msg, reverse);
+        final InboundContext ctx = msg == null ? null : new InboundContext(msg.messageId(), msg.channelId(),
+                msg.authorId(), msg.authorName(), msg.content(), owner == null ? null : owner.toString());
         // Notify host-mod observers of every human message (before the relay-anchor gate), so a
         // bundler can react to a Discord user — e.g. the dev — even on an unanchored message.
         if (msg != null && !msg.isOwnOrBot()) {
@@ -519,8 +526,7 @@ public final class DiscordService {
             // noise). The reply posts via the bot to the originating channel. The owner uuid lets a
             // handler deliver to just that player rather than every online player.
             final String channelId = msg.channelId();
-            boolean handled = DiscordCommandHooks.fire(msg.authorId(), msg.authorName(), msg.content(),
-                    owner == null ? null : owner.toString(),
+            boolean handled = DiscordCommandHooks.fire(ctx,
                     replyContent -> DiscordThreadClient.postPlain(channelId, replyContent));
             if (handled) {
                 return;
@@ -560,7 +566,7 @@ public final class DiscordService {
                 return;
             }
             ServerPlayer recipient = srv.getPlayerList().getPlayer(target);
-            if (recipient != null) {
+            if (recipient != null && !DiscordChatHooks.fireDeliver(recipient, ctx, text)) {
                 recipient.sendSystemMessage(text);
             }
         });
