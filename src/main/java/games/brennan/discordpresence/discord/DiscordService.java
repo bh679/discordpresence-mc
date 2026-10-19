@@ -1255,8 +1255,20 @@ public final class DiscordService {
      * @param files   the attachments (filename + bytes), shown in order as {@code files[0..n]}
      */
     public void postFeedbackAttachments(ServerPlayer player, String content, List<NamedFile> files) {
+        postFeedbackAttachmentsAsync(player, content, files);
+    }
+
+    /**
+     * <b>Public API.</b> As {@link #postFeedbackAttachments}, but the future says whether the post
+     * actually landed: {@code true} only once Discord confirmed the message (a 2xx with its id);
+     * {@code false} when disabled, network not allowed, no files, or the upload failed (a dropped or
+     * timed-out multipart body is not retried, so this is the caller's only signal). Never completes
+     * exceptionally. Lets a bundling mod hold a follow-up (e.g. "logs sent" ping) until the files exist.
+     */
+    public CompletableFuture<Boolean> postFeedbackAttachmentsAsync(ServerPlayer player, String content,
+                                                                   List<NamedFile> files) {
         if (!enabled() || !networkAllowed(player.server) || files == null || files.isEmpty()) {
-            return;
+            return CompletableFuture.completedFuture(false);
         }
         UUID uuid = player.getUUID();
         String name = player.getGameProfile().getName();
@@ -1266,16 +1278,23 @@ public final class DiscordService {
             NamedFile f = files.get(i);
             parts.add(new MultipartBody.FilePart("files[" + i + "]", f.filename(), guessMime(f.filename()), f.bytes()));
         }
-        DiscordWebhookClient.postFiles(name, uuid, threadId, content, parts, List.of())
-                .thenAccept(ref -> {
-                    if (ref != null) {
+        try {
+            return DiscordWebhookClient.postFiles(name, uuid, threadId, content, parts, List.of())
+                    .thenApply(ref -> {
+                        if (ref == null) {
+                            return false;
+                        }
                         reverse.put(ref.messageId(), uuid);
-                    }
-                })
-                .exceptionally(t -> {
-                    LOGGER.warn("Feedback attachment post failed: {}", t.toString());
-                    return null;
-                });
+                        return true;
+                    })
+                    .exceptionally(t -> {
+                        LOGGER.warn("Feedback attachment post failed: {}", t.toString());
+                        return false;
+                    });
+        } catch (RuntimeException e) {
+            LOGGER.warn("Feedback attachment post failed to start: {}", e.toString());
+            return CompletableFuture.completedFuture(false);
+        }
     }
 
     /** Public attachment payload for {@link #postFeedbackAttachments}: a filename and its bytes. */
