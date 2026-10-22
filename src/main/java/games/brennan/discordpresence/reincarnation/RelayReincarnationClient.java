@@ -121,6 +121,17 @@ final class RelayReincarnationClient {
      */
     static String buildQueryUrl(String base, Integer carriage, int radius, String exclude, int limit,
                                 String etag, String difficulty) {
+        return buildQueryUrl(base, carriage, radius, exclude, limit, etag, difficulty, null);
+    }
+
+    /**
+     * As {@link #buildQueryUrl(String, Integer, int, String, int, String, String)}, also asking for one
+     * Free Play provenance: {@code true} ⇒ {@code &freePlay=1}, {@code false} ⇒ {@code &freePlay=0},
+     * {@code null} ⇒ omitted (both). Same reasoning as the partition: the relay caps the band to the
+     * newest {@code limit}, so a fifth or more of an unfiltered band would be lives PlayerMob drops.
+     */
+    static String buildQueryUrl(String base, Integer carriage, int radius, String exclude, int limit,
+                                String etag, String difficulty, Boolean freePlay) {
         StringBuilder sb = new StringBuilder(base).append(PATH)
                 .append("?radius=").append(radius)
                 .append("&limit=").append(limit);
@@ -135,6 +146,9 @@ final class RelayReincarnationClient {
         }
         if (difficulty != null && !difficulty.isBlank()) {
             sb.append("&difficulty=").append(URLEncoder.encode(difficulty, StandardCharsets.UTF_8));
+        }
+        if (freePlay != null) {
+            sb.append("&freePlay=").append(freePlay ? '1' : '0');
         }
         return sb.toString();
     }
@@ -290,10 +304,20 @@ final class RelayReincarnationClient {
      */
     static CompletableFuture<FetchResult> fetch(String base, Integer carriage, int radius,
                                                 String exclude, int limit, String etag, String difficulty) {
+        return fetch(base, carriage, radius, exclude, limit, etag, difficulty, null);
+    }
+
+    /**
+     * As {@link #fetch(String, Integer, int, String, int, String, String)}, also restricted to one Free
+     * Play provenance ({@code null} = both). A relay that predates the filter ignores the parameter;
+     * PlayerMob filters locally as a backstop.
+     */
+    static CompletableFuture<FetchResult> fetch(String base, Integer carriage, int radius, String exclude,
+                                                int limit, String etag, String difficulty, Boolean freePlay) {
         HttpRequest req;
         try {
             req = HttpRequest.newBuilder(
-                    URI.create(buildQueryUrl(base, carriage, radius, exclude, limit, etag, difficulty)))
+                    URI.create(buildQueryUrl(base, carriage, radius, exclude, limit, etag, difficulty, freePlay)))
                     .timeout(DiscordHttp.TIMEOUT)
                     .header("User-Agent", "DiscordPresence")
                     .GET()

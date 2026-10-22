@@ -58,6 +58,13 @@ final class PlayerMobSeam {
     private final Method recDifficulty;                    // ReincarnationRecord.difficulty()
     private final Method qDifficulty;                      // ReincarnationQuery.difficulty()
 
+    /**
+     * {@code ReincarnationQuery.matchFreePlay()} (a {@code Boolean}) — <b>optional</b> like the partition
+     * handles. Present, it lets the relay filter the band by provenance so no fetched slot is a life
+     * PlayerMob will drop; absent, DP fetches both and PlayerMob's own filter sorts them.
+     */
+    private final Method qMatchFreePlay;
+
     PlayerMobSeam() {
         boolean ok = false;
         int noCar = -1;
@@ -68,6 +75,7 @@ final class PlayerMobSeam {
         Method mMode = null, mCar = null, mPlayer = null, mOwner = null;
         Constructor<?> ctorDiff = null;
         Method aDiff = null, mDiff = null;
+        Method mFreePlay = null;
         try {
             srcC = Class.forName(PKG + "ReincarnationSource");
             Class<?> sourcesC = Class.forName(PKG + "ReincarnationSources");
@@ -107,6 +115,13 @@ final class PlayerMobSeam {
                 LOGGER.info("Discord Presence: PlayerMob has no reincarnation difficulty partition ({}); "
                         + "the relay pool stays unpartitioned.", partition.toString());
             }
+            try {
+                mFreePlay = queryC.getMethod("matchFreePlay");
+            } catch (Throwable provenance) {
+                mFreePlay = null;
+                LOGGER.info("Discord Presence: PlayerMob query has no matchFreePlay ({}); "
+                        + "remote echoes are fetched without a Free Play filter.", provenance.toString());
+            }
         } catch (Throwable t) {
             LOGGER.warn("Discord Presence: PlayerMob reincarnation seam unavailable ({}); "
                     + "cross-world reincarnation disabled.", t.toString());
@@ -132,6 +147,7 @@ final class PlayerMobSeam {
         this.recordCtorWithDifficulty = ctorDiff;
         this.recDifficulty = aDiff;
         this.qDifficulty = mDiff;
+        this.qMatchFreePlay = mFreePlay;
     }
 
     /** Whether this PlayerMob build partitions the reincarnation pool by difficulty (>= 0.87.0). */
@@ -206,7 +222,8 @@ final class PlayerMobSeam {
         UUID player = (UUID) qPlayer.invoke(query);
         UUID owner = (UUID) qOwner.invoke(query);
         String difficulty = qDifficulty == null ? null : (String) qDifficulty.invoke(query);
-        return new ReincarnationQueryData(modeName, carriage, player, owner, difficulty);
+        Boolean matchFreePlay = qMatchFreePlay == null ? null : (Boolean) qMatchFreePlay.invoke(query);
+        return new ReincarnationQueryData(modeName, carriage, player, owner, difficulty, matchFreePlay);
     }
 
     /**
