@@ -184,4 +184,69 @@ class ReincarnationCacheTest {
         assertTrue(cache.candidatesFor(owner).isEmpty());
         assertTrue(cache.bandsToFetch(1_000, COOLDOWN, DRIFT).isEmpty());
     }
+
+    // --- Free Play provenance -----------------------------------------------
+
+    @Test
+    void aProvenanceChangeRefreshesImmediatelyRegardlessOfCooldown() {
+        long fetchedAt = 1_000;
+        long now = fetchedAt + 5_000;
+        assertFalse(ReincarnationCache.needsRefresh(10, "hard", false, 10, "hard", false, fetchedAt, now, COOLDOWN, DRIFT));
+        assertTrue(ReincarnationCache.needsRefresh(10, "hard", false, 10, "hard", true, fetchedAt, now, COOLDOWN, DRIFT),
+                "a legit band must not be kept for a player whose run just turned Free Play");
+        // Unfiltered (null) is its own band: it holds both provenances, so it is not either filtered one.
+        assertTrue(ReincarnationCache.needsRefresh(10, "hard", null, 10, "hard", false, fetchedAt, now, COOLDOWN, DRIFT));
+        assertFalse(ReincarnationCache.needsRefresh(10, "hard", null, 10, "hard", null, fetchedAt, now, COOLDOWN, DRIFT));
+    }
+
+    @Test
+    void aBandOfTheOtherProvenanceIsNeitherServedNorTagged() {
+        ReincarnationCache cache = new ReincarnationCache();
+        UUID owner = UUID.randomUUID();
+        cache.observe(owner, 5, "normal", false);
+        cache.store(owner, 5, "normal", false, List.of("legit-life"), "4.5", 1_000);
+
+        assertEquals(List.of("legit-life"), cache.candidatesFor(owner, "normal", false));
+        assertEquals("4.5", cache.etagFor(owner, "normal", false));
+        assertTrue(cache.candidatesFor(owner, "normal", true).isEmpty());
+        assertNull(cache.etagFor(owner, "normal", true), "the legit band's tag must never be sent for a Free Play fetch");
+        // The difficulty still counts too.
+        assertTrue(cache.candidatesFor(owner, "hard", false).isEmpty());
+    }
+
+    @Test
+    void bandsToFetchCarriesTheProvenanceToFetchFor() {
+        ReincarnationCache cache = new ReincarnationCache();
+        UUID owner = UUID.randomUUID();
+        cache.observe(owner, 7, "easy", true);
+        assertEquals(Boolean.TRUE, cache.bandsToFetch(1_000, COOLDOWN, DRIFT).get(owner).freePlay());
+
+        cache.store(owner, 7, "easy", true, List.of("f"), "f1", 1_000);
+        assertFalse(cache.bandsToFetch(1_100, COOLDOWN, DRIFT).containsKey(owner));
+        cache.observe(owner, 7, "easy", false);
+        assertEquals(Boolean.FALSE, cache.bandsToFetch(1_100, COOLDOWN, DRIFT).get(owner).freePlay());
+    }
+
+    @Test
+    void touchKeepsTheBandsProvenance() {
+        ReincarnationCache cache = new ReincarnationCache();
+        UUID owner = UUID.randomUUID();
+        cache.store(owner, 3, "normal", false, List.of("l"), "t", 1_000);
+        cache.touch(owner, 2_000);
+        assertEquals(List.of("l"), cache.candidatesFor(owner, "normal", false));
+        assertTrue(cache.candidatesFor(owner, "normal", null).isEmpty());
+    }
+
+    @Test
+    void theDifficultyOnlyOverloadsAreUnfiltered() {
+        // Callers that predate the provenance filter (and PlayerMob without matchFreePlay) read and write
+        // the unfiltered band, exactly as before.
+        ReincarnationCache cache = new ReincarnationCache();
+        UUID owner = UUID.randomUUID();
+        cache.observe(owner, 4, "hard");
+        cache.store(owner, 4, "hard", List.of("x"), "e", 1_000);
+        assertEquals(List.of("x"), cache.candidatesFor(owner, "hard", null));
+        assertNull(cache.bandsToFetch(1_100, COOLDOWN, DRIFT).get(owner));
+        assertNull(new ReincarnationQueryData("CARRIAGE", 4, null, owner, "hard").matchFreePlay());
+    }
 }

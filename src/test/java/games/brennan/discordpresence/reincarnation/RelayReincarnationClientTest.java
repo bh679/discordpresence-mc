@@ -156,6 +156,29 @@ class RelayReincarnationClientTest {
         assertFalse(RelayReincarnationClient.buildQueryUrl(BASE, 12, 30, null, 5).contains("difficulty"));
     }
 
+    // --- Free Play provenance -----------------------------------------------
+
+    @Test
+    void queryUrlAsksForOneProvenanceWhenGiven() {
+        assertEquals(BASE + "/reincarnations?radius=30&limit=20&carriage=12&freePlay=0",
+                RelayReincarnationClient.buildQueryUrl(BASE, 12, 30, null, 20, null, null, false));
+        assertEquals(BASE + "/reincarnations?radius=30&limit=20&carriage=12&freePlay=1",
+                RelayReincarnationClient.buildQueryUrl(BASE, 12, 30, null, 20, null, null, true));
+    }
+
+    @Test
+    void queryUrlCarriesProvenanceAlongsideTheDifficultyPartition() {
+        assertEquals(BASE + "/reincarnations?radius=30&limit=20&carriage=12&etag=1.2&difficulty=hard&freePlay=0",
+                RelayReincarnationClient.buildQueryUrl(BASE, 12, 30, null, 20, "1.2", "hard", false));
+    }
+
+    @Test
+    void queryUrlOmitsProvenanceWhenUnfiltered() {
+        // null = dev build / PlayerMob without matchFreePlay(): ask for both, as before the filter existed.
+        assertFalse(RelayReincarnationClient.buildQueryUrl(BASE, 12, 30, null, 20, null, "hard", null).contains("freePlay"));
+        assertFalse(RelayReincarnationClient.buildQueryUrl(BASE, 12, 30, null, 20, null, "hard").contains("freePlay"));
+    }
+
     @Test
     void queryUrlOmitsEtagWhenBlankOrNull() {
         assertFalse(RelayReincarnationClient.buildQueryUrl(BASE, null, 30, null, 5, null).contains("etag"));
