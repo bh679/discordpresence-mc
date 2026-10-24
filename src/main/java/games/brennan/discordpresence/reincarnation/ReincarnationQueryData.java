@@ -15,12 +15,21 @@ import java.util.UUID;
  * @param owner    the nearby live player whose session gates reuse, or {@code null}
  * @param difficulty the vanilla-difficulty partition to draw from, or {@code null} for the whole pool
  *                   (PlayerMob older than 0.87.0, or its isolation config turned off)
+ * @param matchFreePlay the Free Play provenance the nearby player can spawn ({@code true} = Free Play
+ *                   lives only, {@code false} = legit only), or {@code null} for both (no filter: dev
+ *                   builds, or a PlayerMob whose query has no {@code matchFreePlay()})
  */
-public record ReincarnationQueryData(String mode, int carriage, UUID player, UUID owner, String difficulty) {
+public record ReincarnationQueryData(String mode, int carriage, UUID player, UUID owner, String difficulty,
+                                     Boolean matchFreePlay) {
+
+    /** A query with no Free Play filter. */
+    public ReincarnationQueryData(String mode, int carriage, UUID player, UUID owner, String difficulty) {
+        this(mode, carriage, player, owner, difficulty, null);
+    }
 
     /** A query with no difficulty partition — the shape before the partition existed. */
     public ReincarnationQueryData(String mode, int carriage, UUID player, UUID owner) {
-        this(mode, carriage, player, owner, null);
+        this(mode, carriage, player, owner, null, null);
     }
 
     /** Whether this is a carriage-band query (the Dungeon-Train spawn path DP pre-fetches for). */

@@ -3,6 +3,7 @@ package games.brennan.discordpresence.reincarnation;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -34,11 +35,23 @@ final class ReincarnationCache {
      * record ids, so two partitions can produce the same tag; reusing a band (or its tag) across a
      * difficulty change would serve the previous difficulty's echoes, or let the relay confirm
      * "unchanged" for a band that is not the one we now want.</p>
+     *
+     * <p>{@code freePlay} is part of the identity for the same reason: it is the Free Play provenance the
+     * band was filtered to ({@code null} = both). PlayerMob spawns a life only for a player whose Free
+     * Play state matches it, so a band fetched for the other provenance is one the player can't use.</p>
      */
-    private record CachedBand(int carriage, String difficulty, List<Object> records, long fetchedAt, String etag) {}
+    private record CachedBand(int carriage, String difficulty, Boolean freePlay, List<Object> records,
+                              long fetchedAt, String etag) {}
 
-    /** What a {@code candidates()} call told us to pre-fetch for: where the player is, and their partition. */
-    record FetchTarget(int carriage, String difficulty) {}
+    /**
+     * What a {@code candidates()} call told us to pre-fetch for: where the player is, their difficulty
+     * partition, and the Free Play provenance they can spawn ({@code null} = unfiltered).
+     */
+    record FetchTarget(int carriage, String difficulty, Boolean freePlay) {
+        FetchTarget(int carriage, String difficulty) {
+            this(carriage, difficulty, null);
+        }
+    }
 
     /** owner → latest {@link FetchTarget} observed from a {@code candidates()} call (drives prefetch). */
     private final ConcurrentHashMap<UUID, FetchTarget> observed = new ConcurrentHashMap<>();
@@ -57,8 +70,16 @@ final class ReincarnationCache {
      * ({@code null} = unpartitioned). Server-thread, O(1).
      */
     void observe(UUID owner, int carriage, String difficulty) {
+        observe(owner, carriage, difficulty, null);
+    }
+
+    /**
+     * As {@link #observe(UUID, int, String)}, also recording the Free Play provenance the player can spawn
+     * ({@code null} = unfiltered: dev builds, or a PlayerMob without the query handle). Server-thread, O(1).
+     */
+    void observe(UUID owner, int carriage, String difficulty, Boolean freePlay) {
         if (owner != null) {
-            observed.put(owner, new FetchTarget(carriage, difficulty));
+            observed.put(owner, new FetchTarget(carriage, difficulty, freePlay));
         }
     }
 
@@ -73,11 +94,16 @@ final class ReincarnationCache {
      * is on its way. Server-thread, O(1).
      */
     List<Object> candidatesFor(UUID owner, String difficulty) {
+        return candidatesFor(owner, difficulty, null);
+    }
+
+    /** As {@link #candidatesFor(UUID, String)}, also reading a band of the other provenance as empty. */
+    List<Object> candidatesFor(UUID owner, String difficulty, Boolean freePlay) {
         if (owner == null) {
             return List.of();
         }
         CachedBand band = bands.get(owner);
-        if (band == null || !samePartition(band.difficulty(), difficulty)) {
+        if (band == null || !sameBand(band, difficulty, freePlay)) {
             return List.of();
         }
         return band.records();
@@ -88,6 +114,15 @@ final class ReincarnationCache {
         String x = a == null ? "" : a;
         String y = b == null ? "" : b;
         return x.equals(y);
+    }
+
+    /** Whether two Free Play filters are the same ({@code null} = unfiltered, distinct from both values). */
+    static boolean sameProvenance(Boolean a, Boolean b) {
+        return Objects.equals(a, b);
+    }
+
+    private static boolean sameBand(CachedBand band, String difficulty, Boolean freePlay) {
+        return samePartition(band.difficulty(), difficulty) && sameProvenance(band.freePlay(), freePlay);
     }
 
     /**
@@ -105,9 +140,10 @@ final class ReincarnationCache {
             CachedBand band = bands.get(owner);
             Integer cachedCarriage = band == null ? null : band.carriage();
             String cachedDifficulty = band == null ? null : band.difficulty();
+            Boolean cachedFreePlay = band == null ? null : band.freePlay();
             long fetchedAt = band == null ? 0L : band.fetchedAt();
-            if (needsRefresh(cachedCarriage, cachedDifficulty, target.carriage(), target.difficulty(),
-                    fetchedAt, now, cooldownMillis, drift)) {
+            if (needsRefresh(cachedCarriage, cachedDifficulty, cachedFreePlay, target.carriage(),
+                    target.difficulty(), target.freePlay(), fetchedAt, now, cooldownMillis, drift)) {
                 out.put(owner, target);
             }
         }
@@ -126,10 +162,25 @@ final class ReincarnationCache {
     static boolean needsRefresh(Integer cachedCarriage, String cachedDifficulty,
                                 int observedCarriage, String observedDifficulty, long fetchedAt,
                                 long now, long cooldownMillis, int drift) {
+        return needsRefresh(cachedCarriage, cachedDifficulty, null, observedCarriage, observedDifficulty, null,
+                fetchedAt, now, cooldownMillis, drift);
+    }
+
+    /**
+     * As {@link #needsRefresh(Integer, String, int, String, long, long, long, int)}, also refetching at once
+     * when the player's Free Play provenance changed (e.g. a run turned Free Play): the cached band was
+     * filtered to lives they can no longer spawn.
+     */
+    static boolean needsRefresh(Integer cachedCarriage, String cachedDifficulty, Boolean cachedFreePlay,
+                                int observedCarriage, String observedDifficulty, Boolean observedFreePlay,
+                                long fetchedAt, long now, long cooldownMillis, int drift) {
         if (cachedCarriage == null) {
             return true;
         }
         if (!samePartition(cachedDifficulty, observedDifficulty)) {
+            return true;
+        }
+        if (!sameProvenance(cachedFreePlay, observedFreePlay)) {
             return true;
         }
         if (Math.abs(observedCarriage - cachedCarriage) > drift) {
@@ -157,10 +208,16 @@ final class ReincarnationCache {
 
     /** As {@link #store(UUID, int, List, String, long)}, tagging the band with the partition it was fetched for. */
     void store(UUID owner, int carriage, String difficulty, List<Object> records, String etag, long now) {
+        store(owner, carriage, difficulty, null, records, etag, now);
+    }
+
+    /** As {@link #store(UUID, int, String, List, String, long)}, also tagging the band's Free Play filter. */
+    void store(UUID owner, int carriage, String difficulty, Boolean freePlay, List<Object> records, String etag,
+               long now) {
         if (owner == null) {
             return;
         }
-        bands.put(owner, new CachedBand(carriage, difficulty, List.copyOf(records), now, etag));
+        bands.put(owner, new CachedBand(carriage, difficulty, freePlay, List.copyOf(records), now, etag));
     }
 
     /**
@@ -174,7 +231,7 @@ final class ReincarnationCache {
             return;
         }
         bands.computeIfPresent(owner,
-            (k, b) -> new CachedBand(b.carriage(), b.difficulty(), b.records(), now, b.etag()));
+            (k, b) -> new CachedBand(b.carriage(), b.difficulty(), b.freePlay(), b.records(), now, b.etag()));
     }
 
     /**
@@ -191,11 +248,16 @@ final class ReincarnationCache {
      * could confirm "unchanged" against a band we no longer want.
      */
     String etagFor(UUID owner, String difficulty) {
+        return etagFor(owner, difficulty, null);
+    }
+
+    /** As {@link #etagFor(UUID, String)}, also {@code null} when the cached band has the other provenance. */
+    String etagFor(UUID owner, String difficulty, Boolean freePlay) {
         if (owner == null) {
             return null;
         }
         CachedBand band = bands.get(owner);
-        if (band == null || !samePartition(band.difficulty(), difficulty)) {
+        if (band == null || !sameBand(band, difficulty, freePlay)) {
             return null;
         }
         return band.etag();

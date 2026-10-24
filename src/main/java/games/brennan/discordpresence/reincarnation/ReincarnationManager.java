@@ -51,8 +51,9 @@ public final class ReincarnationManager {
     private static final int INBOUND_RADIUS = 30;          // matches the relay/PlayerMob carriage band
     /**
      * Remote lives fetched per band. Matches PlayerMob's {@code MAX_CANDIDATES_PER_BAND} (20) and stays under
-     * the relay's {@code MAX_LIMIT} (50). PlayerMob drops lives the player already met and Free Play
-     * mismatches before it trims to its cap, so a band of only 5 ran dry on quiet stretches. 20 snapshots is
+     * the relay's {@code MAX_LIMIT} (50). PlayerMob drops lives the player already met this life before it
+     * trims to its cap (the relay already filters Free Play provenance), so a band of only 5 ran dry on
+     * quiet stretches. 20 snapshots is
      * a few tens of KB, re-shipped only when the band's etag changes.
      */
     static final int INBOUND_LIMIT = 20;
@@ -214,9 +215,10 @@ public final class ReincarnationManager {
             return List.of();
         }
         // The difficulty partition rides along: it selects which band to pre-fetch, and a band belonging
-        // to a difficulty the player has since left is not offered.
-        cache.observe(owner, query.carriage(), query.difficulty());
-        return cache.candidatesFor(owner, query.difficulty());
+        // to a difficulty the player has since left is not offered. The Free Play provenance likewise:
+        // the relay filters the band to it, and a band of the other provenance is not offered.
+        cache.observe(owner, query.carriage(), query.difficulty(), query.matchFreePlay());
+        return cache.candidatesFor(owner, query.difficulty(), query.matchFreePlay());
     }
 
     // --- the periodic tick (off the server thread) ---------------------------
@@ -322,15 +324,16 @@ public final class ReincarnationManager {
             UUID owner = e.getKey();
             int carriage = e.getValue().carriage();
             String difficulty = e.getValue().difficulty();
+            Boolean freePlay = e.getValue().freePlay();
             if (!cache.tryBeginFetch(owner)) {
                 continue;
             }
             Integer carriageParam = carriage == s.noCarriage() ? null : carriage;
             // Send the tag of the band we already hold: an unchanged band comes back with no snapshots.
-            // Scoped to this partition — the tag of another difficulty's band must never be sent.
-            String etag = cache.etagFor(owner, difficulty);
+            // Scoped to this partition — the tag of another difficulty's (or provenance's) band must never be sent.
+            String etag = cache.etagFor(owner, difficulty, freePlay);
             RelayReincarnationClient.fetch(base, carriageParam, INBOUND_RADIUS, owner.toString(), INBOUND_LIMIT,
-                    etag, difficulty)
+                    etag, difficulty, freePlay)
                     .whenComplete((result, err) -> {
                         try {
                             if (err == null && result != null && result.unchanged()) {
@@ -343,7 +346,7 @@ public final class ReincarnationManager {
                                         : buildRecords(s, result.records(), difficulty);
                                 String newEtag = result == null ? null : result.etag();
                                 // Store even an empty band so the cooldown applies (don't re-poll every tick).
-                                cache.store(owner, carriage, difficulty, band.records(), newEtag,
+                                cache.store(owner, carriage, difficulty, freePlay, band.records(), newEtag,
                                         System.currentTimeMillis());
                             }
                         } catch (Exception ex) {
