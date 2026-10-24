@@ -33,4 +33,15 @@ class ReincarnationManagerTest {
         // When DP's own toggle is off, that's the reported reason even if PlayerMob is also missing.
         assertEquals("disabled by config", ReincarnationManager.inertReason(false, false, false, false));
     }
+
+    @Test
+    void inboundBandIsWideEnoughNotToRunDry() {
+        // PlayerMob keeps up to 20 eligible lives per band (after dropping met + Free Play mismatches);
+        // a band of 5 ran dry on quiet stretches. The relay caps a query at 50.
+        assertEquals(20, ReincarnationManager.INBOUND_LIMIT);
+        assertTrue(ReincarnationManager.INBOUND_LIMIT <= 50, "relay MAX_LIMIT is 50");
+        String url = RelayReincarnationClient.buildQueryUrl("https://relay.example", 12, 30, null,
+                ReincarnationManager.INBOUND_LIMIT);
+        assertTrue(url.contains("&limit=20"), url);
+    }
 }

@@ -49,7 +49,14 @@ public final class ReincarnationManager {
     private static final long INTERVAL_SECONDS = 60;
     private static final int OUTBOUND_LIMIT = 50;          // recentDeaths scrape window (≪ outbox cap)
     private static final int INBOUND_RADIUS = 30;          // matches the relay/PlayerMob carriage band
-    private static final int INBOUND_LIMIT = 5;            // matches MAX_CANDIDATES_PER_BAND
+    /**
+     * Remote lives fetched per band. Matches PlayerMob's {@code MAX_CANDIDATES_PER_BAND} (20) and stays under
+     * the relay's {@code MAX_LIMIT} (50). PlayerMob drops lives the player already met this life before it
+     * trims to its cap (the relay already filters Free Play provenance), so a band of only 5 ran dry on
+     * quiet stretches. 20 snapshots is
+     * a few tens of KB, re-shipped only when the band's etag changes.
+     */
+    static final int INBOUND_LIMIT = 20;
     private static final long REFRESH_COOLDOWN_MILLIS = 30_000;
     private static final int BAND_DRIFT = INBOUND_RADIUS / 2; // re-fetch before the player leaves the band
 
