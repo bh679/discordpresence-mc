@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import games.brennan.discordpresence.config.DiscordPresenceConfig;
 import org.slf4j.Logger;
 
+import java.io.IOException;
 import java.net.ConnectException;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -109,6 +110,10 @@ public final class DiscordHttp {
     // public feed two to four times. Hence retryServerErrors: message-CREATING posts pass false and
     // keep only the unambiguous retries (429, pre-send connection failures); reads and other
     // idempotent calls keep the 5xx retry.
+    //
+    // None of that retries in-process on an ambiguous failure, but a post carrying a relay post id
+    // (X-DP-Post-Id, see dp-relay's hookdedupe.js) can be re-sent later, because the relay answers a
+    // repeat itself. Those go to DiscordResendQueue: see isQueueableFailure.
 
     /** Total attempts (1 initial + 3 retries). */
     static final int MAX_ATTEMPTS = 4;
@@ -212,14 +217,25 @@ public final class DiscordHttp {
     }
 
     /**
-     * Whether {@code t} — as delivered to a {@link CompletableFuture#exceptionally} stage, possibly
-     * wrapped in a {@link CompletionException} — is a provably-pre-send connection failure (relay/DNS
-     * unreachable). Such a request never reached Discord, so it is safe to durably resend without
-     * risking a duplicate; ambiguous read failures return {@code false} and stay best-effort-drop,
-     * matching {@link #isRetryableException}. This is the gate the durable resend queue enqueues on.
+     * Whether a failed post can go to the durable resend queue. A provably-pre-send connection failure
+     * always can. With a relay post id ({@code hasPostId}) so can a read timeout, any other transport
+     * failure, and a {@link RetryableStatusException}: they are ambiguous, but the relay dedupes the
+     * re-send by that id. Without one they stay dropped, so a resend can't double-post.
      */
-    static boolean isConnectionFailure(Throwable t) {
-        return t != null && isRetryableException(unwrap(t));
+    static boolean isQueueableFailure(Throwable t, boolean hasPostId) {
+        if (t == null) {
+            return false;
+        }
+        Throwable cause = unwrap(t);
+        return isRetryableException(cause)
+                || (hasPostId && (cause instanceof RetryableStatusException || cause instanceof IOException));
+    }
+
+    /** A post answered 429 or 5xx after its in-process retries, reported as a failure so it can be queued. */
+    static final class RetryableStatusException extends RuntimeException {
+        RetryableStatusException(int status) {
+            super("HTTP " + status);
+        }
     }
 
     /** Exponential backoff (1s, 2s, 4s … capped) plus a little jitter, in ms, for attempt {@code index}. */

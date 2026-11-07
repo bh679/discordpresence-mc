@@ -4,6 +4,8 @@ import games.brennan.discordpresence.discord.DiscordResendQueue.QueuedPost;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -12,8 +14,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -153,13 +157,138 @@ class DiscordResendQueueTest {
         assertEquals(DiscordResendQueue.MAX_ITEMS, q.size());
 
         Set<String> bodies = ConcurrentHashMap.newKeySet();
-        q.flush(post -> {
-            bodies.add(post.rootJson());
-            return CompletableFuture.completedFuture(true);
-        });
+        while (q.size() > 0) { // each flush sends only a few
+            q.flush(post -> {
+                bodies.add(post.rootJson());
+                return CompletableFuture.completedFuture(true);
+            });
+        }
         assertEquals(DiscordResendQueue.MAX_ITEMS, bodies.size());
         assertFalse(bodies.contains("{\"n\":0}"), "the oldest entry was evicted");
         assertTrue(bodies.contains("{\"n\":" + DiscordResendQueue.MAX_ITEMS + "}"), "the newest was kept");
+    }
+
+    private static final byte[] PNG = {1, 2, 3, 4};
+    private static final String PHOTO_BODY =
+            "{\"embeds\":[{\"title\":\"t\",\"image\":{\"url\":\"attachment://photo.png\"}}]}";
+    private static final String POST_ID = "6a9e8815-b87e-45a3-b473-1c0b7e6e14b6";
+
+    private static Path photoDir(Path dir) {
+        return dir.resolve(DiscordResendQueue.PHOTO_DIR);
+    }
+
+    private static long photoCount(Path dir) throws IOException {
+        if (!Files.isDirectory(photoDir(dir))) return 0;
+        try (java.util.stream.Stream<Path> files = Files.list(photoDir(dir))) {
+            return files.count();
+        }
+    }
+
+    @Test
+    void postIdAndPhotoSurviveReload(@TempDir Path dir) throws IOException {
+        DiscordResendQueue q = new DiscordResendQueue();
+        q.load(queueFile(dir));
+        q.enqueue(URL, null, PHOTO_BODY, POST_ID, PNG, "photo.png");
+        assertFalse(Files.readString(queueFile(dir)).contains("AQIDBA"), "the photo must not be in the JSON");
+
+        DiscordResendQueue reloaded = new DiscordResendQueue();
+        reloaded.load(queueFile(dir));
+        QueuedPost post = drainCollecting(reloaded, false).get(0);
+        assertEquals(POST_ID, post.postId());
+        assertEquals("photo.png", post.filename());
+        assertEquals(PHOTO_BODY, post.rootJson());
+        assertArrayEquals(PNG, reloaded.readPhoto(post));
+    }
+
+    @Test
+    void deliveringAPostDeletesItsPhoto(@TempDir Path dir) throws IOException {
+        DiscordResendQueue q = new DiscordResendQueue();
+        q.load(queueFile(dir));
+        q.enqueue(URL, null, PHOTO_BODY, POST_ID, PNG, "photo.png");
+        assertEquals(1, photoCount(dir));
+        drainCollecting(q, true);
+        assertEquals(0, q.size());
+        assertEquals(0, photoCount(dir));
+    }
+
+    @Test
+    void pastThePhotoCapTheOldestPostsGoTextOnly(@TempDir Path dir) throws IOException {
+        DiscordResendQueue q = new DiscordResendQueue(2L * PNG.length);
+        q.load(queueFile(dir));
+        for (int i = 0; i < 3; i++) {
+            q.enqueue(URL, null, PHOTO_BODY, POST_ID, PNG, "photo.png");
+        }
+        assertEquals(2, photoCount(dir));
+        List<QueuedPost> posts = drainCollecting(q, false);
+        assertEquals(3, posts.size(), "going text-only must not lose the post");
+        assertNull(posts.get(0).photoFile(), "the oldest loses its photo");
+        assertFalse(posts.get(0).rootJson().contains("attachment://"), "and its now-broken image ref");
+        assertNotNull(posts.get(2).photoFile());
+    }
+
+    @Test
+    void aMissingPhotoFileMakesThePostTextOnlyOnLoad(@TempDir Path dir) throws IOException {
+        DiscordResendQueue q = new DiscordResendQueue();
+        q.load(queueFile(dir));
+        q.enqueue(URL, null, PHOTO_BODY, POST_ID, PNG, "photo.png");
+        try (java.util.stream.Stream<Path> files = Files.list(photoDir(dir))) {
+            for (Path f : files.toList()) Files.delete(f);
+        }
+        DiscordResendQueue reloaded = new DiscordResendQueue();
+        reloaded.load(queueFile(dir));
+        QueuedPost post = drainCollecting(reloaded, false).get(0);
+        assertNull(post.photoFile());
+        assertFalse(post.rootJson().contains("attachment://"));
+    }
+
+    @Test
+    void loadRemovesPhotosNoEntryRefersTo(@TempDir Path dir) throws IOException {
+        Files.createDirectories(photoDir(dir));
+        Path orphan = photoDir(dir).resolve(POST_ID + ".png");
+        Files.write(orphan, PNG);
+        new DiscordResendQueue().load(queueFile(dir));
+        assertFalse(Files.exists(orphan));
+    }
+
+    @Test
+    void aPhotoNameOffDiskCannotWalkOutOfTheFolder(@TempDir Path dir) throws IOException {
+        Path secret = dir.resolve("secret.png");
+        Files.write(secret, PNG);
+        Files.writeString(queueFile(dir), "{\"pending\":[{\"key\":\"k\",\"url\":\"" + URL + "\",\"rootJson\":"
+                + "\"{}\",\"createdAtMs\":" + System.currentTimeMillis()
+                + ",\"photoFile\":\"../secret.png\",\"filename\":\"photo.png\"}]}");
+        DiscordResendQueue q = new DiscordResendQueue();
+        q.load(queueFile(dir));
+        QueuedPost post = drainCollecting(q, true).get(0);
+        assertNull(post.photoFile());
+        assertTrue(Files.exists(secret), "delivering the entry must not delete a file outside the folder");
+    }
+
+    @Test
+    void aQueueFileFromAnOlderVersionStillLoads(@TempDir Path dir) throws IOException {
+        Files.writeString(queueFile(dir), "{\"pending\":[{\"key\":\"k\",\"url\":\"" + URL + "\",\"threadId\":\"t\","
+                + "\"rootJson\":\"{}\",\"createdAtMs\":" + System.currentTimeMillis() + "}]}");
+        DiscordResendQueue q = new DiscordResendQueue();
+        q.load(queueFile(dir));
+        QueuedPost post = drainCollecting(q, true).get(0);
+        assertEquals("t", post.threadId());
+        assertNull(post.postId());
+        assertNull(post.photoFile());
+    }
+
+    @Test
+    void oneFlushSendsOnlyTheOldestFew(@TempDir Path dir) {
+        DiscordResendQueue q = new DiscordResendQueue();
+        q.load(queueFile(dir));
+        int total = DiscordResendQueue.MAX_SENDS_PER_FLUSH + 3;
+        for (int i = 0; i < total; i++) {
+            q.enqueue(URL, null, "{\"content\":\"" + i + "\"}");
+        }
+        List<QueuedPost> first = drainCollecting(q, true);
+        assertEquals(DiscordResendQueue.MAX_SENDS_PER_FLUSH, first.size());
+        assertEquals("{\"content\":\"0\"}", first.get(0).rootJson(), "oldest first");
+        assertEquals(3, q.size());
+        assertEquals(3, drainCollecting(q, true).size(), "the rest go on the next flush");
     }
 
     /** Flush with an always-delivered sender, collecting the posts it saw (order not guaranteed). */

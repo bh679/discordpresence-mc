@@ -12,6 +12,7 @@ import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -34,6 +35,9 @@ import java.util.function.Function;
  * {@code null}; it never throws into game logic.</p>
  */
 final class DiscordWebhookClient {
+
+    /** Stays the same on every retry of a post, so the relay can answer a repeat (dp-relay's hookdedupe.js). */
+    static final String POST_ID_HEADER = "X-DP-Post-Id";
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -89,15 +93,14 @@ final class DiscordWebhookClient {
         }
 
         String body = buildPayload(content, playerName, uuid, allowedUserIds);
+        String postId = newPostId();
 
-        return sendAndParse(tid -> HttpRequest.newBuilder(URI.create(withQuery(webhookUrl, tid)))
-                        .header("Content-Type", "application/json")
-                        .header("User-Agent", "DiscordPresence-Mod")
-                        .timeout(DiscordHttp.TIMEOUT)
+        return sendAndParse(tid -> request(withQuery(webhookUrl, tid), "application/json", DiscordHttp.TIMEOUT, postId)
                         .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
                         .build(),
-                threadId)
-                .exceptionally(t -> onSendFailed("Discord webhook POST failed", t, webhookUrl, threadId, body));
+                threadId, postId != null)
+                .exceptionally(t -> onSendFailed("Discord webhook POST failed", t, webhookUrl, threadId, body,
+                        postId, null, null));
     }
 
     /**
@@ -150,6 +153,7 @@ final class DiscordWebhookClient {
         }
 
         JsonObject root = buildReportRoot(playerName, uuid, embed, content, allowedUserIds);
+        String postId = newPostId();
 
         // Built once and reused for the dead-thread retry below (only the URL's thread_id differs).
         MultipartBody mb = png == null ? null : MultipartBody.jsonWithPng(
@@ -158,27 +162,19 @@ final class DiscordWebhookClient {
         Function<String, HttpRequest> build = tid -> {
             String url = withQuery(webhookUrl, tid);
             if (mb != null) {
-                return HttpRequest.newBuilder(URI.create(url))
-                        .header("Content-Type", mb.contentType())
-                        .header("User-Agent", "DiscordPresence-Mod")
-                        .timeout(DiscordHttp.REPORT_TIMEOUT)  // image upload — needs more than the 10s JSON timeout
+                // image upload — needs more than the 10s JSON timeout
+                return request(url, mb.contentType(), DiscordHttp.REPORT_TIMEOUT, postId)
                         .POST(HttpRequest.BodyPublishers.ofByteArray(mb.body()))
                         .build();
             }
-            return HttpRequest.newBuilder(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .header("User-Agent", "DiscordPresence-Mod")
-                    .timeout(DiscordHttp.TIMEOUT)
+            return request(url, "application/json", DiscordHttp.TIMEOUT, postId)
                     .POST(HttpRequest.BodyPublishers.ofString(root.toString(), StandardCharsets.UTF_8))
                     .build();
         };
 
-        return sendAndParse(build, threadId)
-                // Only the JSON embed is made durable: a multipart image post (png != null) is re-queued
-                // as the embed WITHOUT the attachment image (the PNG isn't persisted), so a replay renders
-                // the report minus the gear picture rather than a broken attachment.
+        return sendAndParse(build, threadId, postId != null)
                 .exceptionally(t -> onSendFailed("Discord webhook report POST failed", t,
-                        webhookUrl, threadId, durableBody(root, png != null)));
+                        webhookUrl, threadId, root.toString(), postId, png, filename));
     }
 
     /**
@@ -205,7 +201,7 @@ final class DiscordWebhookClient {
                         .timeout(DiscordHttp.REPORT_TIMEOUT)  // file upload — needs more than the 10s JSON timeout
                         .POST(HttpRequest.BodyPublishers.ofByteArray(mb.body()))
                         .build(),
-                threadId)
+                threadId, false)
                 // Multipart file uploads stay best-effort: the binary parts aren't persisted, so there is
                 // nothing meaningful to durably resend (the content line alone — "logs attached" — is useless
                 // without the files). Dropped on failure as before.
@@ -216,49 +212,96 @@ final class DiscordWebhookClient {
     }
 
     /**
-     * Resend a previously-queued plain-JSON webhook {@code rootJson} to {@code webhookUrl} (into
-     * {@code threadId} when non-null), reusing the same {@code ?wait=true} request the live path builds.
-     * Returns the parsed ref — non-null ⇒ a confirmed 2xx (the resend queue removes the entry); null ⇒
-     * any failure (the queue keeps it for the next flush). Unlike {@link #post}/{@link #postReport}, a
-     * failure here does <b>not</b> re-enqueue — the entry is already queued — so a flush can't grow it.
+     * Resend a queued post, reusing the same {@code ?wait=true} request the live path builds, with its
+     * original post id so the relay can spot a repeat. {@code png} is the post's saved photo; when the
+     * entry had one and it is gone, the post goes text-only rather than with a broken attachment.
+     *
+     * <p>The future resolves {@code true} when the queue is finished with the entry, per
+     * {@link #resendFinished}, and {@code false} to keep it for the next flush. Unlike
+     * {@link #post}/{@link #postReport}, a failure never re-enqueues: the entry is already on disk.</p>
      */
-    static CompletableFuture<DiscordMessageRef> resend(String webhookUrl, String threadId, String rootJson) {
-        if (webhookUrl == null || webhookUrl.isBlank() || rootJson == null || rootJson.isBlank()) {
-            return CompletableFuture.completedFuture(null);
+    static CompletableFuture<Boolean> resend(DiscordResendQueue.QueuedPost post, byte[] png) {
+        Function<String, HttpRequest> build;
+        if (png != null && post.filename() != null) {
+            MultipartBody mb = MultipartBody.jsonWithPng(
+                    "DPBoundary" + UUID.randomUUID().toString().replace("-", ""),
+                    post.rootJson(), "files[0]", post.filename(), png);
+            build = tid -> request(withQuery(post.url(), tid), mb.contentType(), DiscordHttp.REPORT_TIMEOUT, post.postId())
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(mb.body()))
+                    .build();
+        } else {
+            String json = post.photoFile() == null
+                    ? post.rootJson()
+                    : durableBody(JsonParser.parseString(post.rootJson()).getAsJsonObject(), true);
+            build = tid -> request(withQuery(post.url(), tid), "application/json", DiscordHttp.TIMEOUT, post.postId())
+                    .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
+                    .build();
         }
-        return sendAndParse(tid -> HttpRequest.newBuilder(URI.create(withQuery(webhookUrl, tid)))
-                        .header("Content-Type", "application/json")
-                        .header("User-Agent", "DiscordPresence-Mod")
-                        .timeout(DiscordHttp.TIMEOUT)
-                        .POST(HttpRequest.BodyPublishers.ofString(rootJson, StandardCharsets.UTF_8))
-                        .build(),
-                threadId)
+        return sendFollowingDeadThread(build, post.threadId())
+                .thenApply(resp -> {
+                    int code = resp.statusCode();
+                    if (!resendFinished(code)) {
+                        LOGGER.warn("Discord webhook resend returned HTTP {} (kept for next flush).", code);
+                        return false;
+                    }
+                    if (code >= 400) {
+                        LOGGER.warn("Discord webhook resend refused with HTTP {} (dropped): {}", code, truncate(resp.body()));
+                    }
+                    return true;
+                })
                 .exceptionally(t -> {
                     LOGGER.warn("Discord webhook resend failed (kept for next flush): {}", t.toString());
-                    return null;
+                    return false;
                 });
     }
 
     /**
-     * Shared failure tail for the plain-JSON webhook sends. Logs, and on a provably-pre-send connection
-     * failure (a real relay/DNS outage — {@link DiscordHttp#isConnectionFailure}) spools {@code rootJson}
-     * to the durable resend queue so it isn't lost across the outage / a restart. Any other failure (an
-     * ambiguous read timeout, whose body may already be on the wire) is dropped as before, so a resend
-     * can't duplicate the message. Always returns {@code null} (the ref callers already tolerate).
+     * Whether a resend's status ends its queue entry: any 2xx, including the relay's {@code 202} for a
+     * duplicate or withheld post, which carries no message id; or a 4xx that will never succeed. A 408,
+     * 429 or 5xx may yet succeed. Pure, for tests.
      */
-    private static DiscordMessageRef onSendFailed(String what, Throwable t, String webhookUrl,
-                                                  String threadId, String rootJson) {
+    static boolean resendFinished(int status) {
+        boolean success = status >= 200 && status < 300;
+        boolean refused = status >= 400 && status < 500 && status != 408 && status != 429;
+        return success || refused;
+    }
+
+    /** A request with this client's common headers, plus the relay post id when there is one. */
+    private static HttpRequest.Builder request(String url, String contentType, Duration timeout, String postId) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
+                .header("Content-Type", contentType)
+                .header("User-Agent", "DiscordPresence-Mod")
+                .timeout(timeout);
+        if (postId != null) {
+            builder.header(POST_ID_HEADER, postId);
+        }
+        return builder;
+    }
+
+    /** A fresh post id in relay mode; {@code null} when posting straight to Discord, which has nothing to dedupe it. */
+    private static String newPostId() {
+        return DiscordPresenceConfig.isRelayMode() ? UUID.randomUUID().toString() : null;
+    }
+
+    /**
+     * Shared failure tail for the webhook sends. Logs, and spools the post to the durable resend queue
+     * when {@link DiscordHttp#isQueueableFailure} says a re-send is safe, so it isn't lost across a relay
+     * stall, an outage or a restart. Otherwise it is dropped as before, so a resend can't duplicate the
+     * message. Always returns {@code null} (the ref callers already tolerate).
+     */
+    private static DiscordMessageRef onSendFailed(String what, Throwable t, String webhookUrl, String threadId,
+                                                  String rootJson, String postId, byte[] png, String filename) {
         LOGGER.warn("{}: {}", what, t.toString());
-        if (DiscordHttp.isConnectionFailure(t)) {
-            DiscordResendQueue.get().enqueue(webhookUrl, threadId, rootJson);
+        if (DiscordHttp.isQueueableFailure(t, postId != null)) {
+            DiscordResendQueue.get().enqueue(webhookUrl, threadId, rootJson, postId, png, filename);
         }
         return null;
     }
 
     /**
-     * The plain-JSON body to durably resend. When the failed send carried a composed PNG
-     * ({@code hadAttachmentImage}), strip each embed's {@code attachment://} image ref — the PNG isn't
-     * persisted, so on replay the embed renders without the gear image rather than a broken attachment.
+     * The plain-JSON body to resend when a queued post no longer has its image
+     * ({@code hadAttachmentImage}): strips each embed's {@code attachment://} image ref, so the embed
+     * renders without the picture rather than with a broken attachment.
      * Otherwise {@code root} is already a plain-JSON body. Deep-copies so the live object the caller may
      * still hold is untouched.
      */
@@ -377,23 +420,34 @@ final class DiscordWebhookClient {
      * the player's thread for that would be wrong. Every other status parses exactly as before.</p>
      *
      * <p>Every send here CREATES a message, so both go out with {@code retryServerErrors=false}: a 5xx
-     * cannot be resent without risking a duplicate, because behind the relay it may be the relay
-     * abandoning a forward that had already reached Discord (see {@link DiscordHttp#shouldRetryStatus}).
+     * cannot be resent in-process without risking a duplicate, because behind the relay it may be the
+     * relay abandoning a forward that had already reached Discord (see {@link DiscordHttp#shouldRetryStatus}).
      * 429s and pre-send connection failures are still retried — those provably created nothing.</p>
      *
      * @param buildForThread builds the request for a given thread id ({@code null} → top-level)
+     * @param failOnRetryableStatus report a final 429 or 5xx as a {@link DiscordHttp.RetryableStatusException}
+     *        so the caller can queue it; only for a post the relay can dedupe
      */
-    private static CompletableFuture<DiscordMessageRef> sendAndParse(
+    static CompletableFuture<DiscordMessageRef> sendAndParse(
+            Function<String, HttpRequest> buildForThread, String threadId, boolean failOnRetryableStatus) {
+        return sendFollowingDeadThread(buildForThread, threadId).thenApply(resp -> {
+            if (failOnRetryableStatus && DiscordHttp.isRetryableStatus(resp.statusCode())) {
+                throw new DiscordHttp.RetryableStatusException(resp.statusCode());
+            }
+            return parseMessageRef(resp);
+        });
+    }
+
+    private static CompletableFuture<HttpResponse<String>> sendFollowingDeadThread(
             Function<String, HttpRequest> buildForThread, String threadId) {
         return DiscordHttp.sendWithRetry(buildForThread.apply(threadId), false)
                 .thenCompose(resp -> {
                     if (threadId == null || !isDeadThread(resp)) {
-                        return CompletableFuture.completedFuture(parseMessageRef(resp));
+                        return CompletableFuture.completedFuture(resp);
                     }
                     DiscordService.reportDeadThread(threadId);
                     LOGGER.warn("Discord thread {} no longer exists — reposting to the parent channel.", threadId);
-                    return DiscordHttp.sendWithRetry(buildForThread.apply(null), false)
-                            .thenApply(DiscordWebhookClient::parseMessageRef);
+                    return DiscordHttp.sendWithRetry(buildForThread.apply(null), false);
                 });
     }
 

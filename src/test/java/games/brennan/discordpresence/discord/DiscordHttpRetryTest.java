@@ -99,20 +99,20 @@ class DiscordHttpRetryTest {
     @Test
     void enqueuesOnlyProvablyPreSendConnectionFailures() {
         // These never reached Discord → safe to durably resend without a duplicate.
-        assertTrue(DiscordHttp.isConnectionFailure(new ConnectException("refused")));
-        assertTrue(DiscordHttp.isConnectionFailure(new UnknownHostException("dns")));
-        assertTrue(DiscordHttp.isConnectionFailure(new HttpConnectTimeoutException("connect timed out")));
+        assertTrue(noIdQueueable(new ConnectException("refused")));
+        assertTrue(noIdQueueable(new UnknownHostException("dns")));
+        assertTrue(noIdQueueable(new HttpConnectTimeoutException("connect timed out")));
         // As it actually arrives at a CompletableFuture.exceptionally stage: wrapped in CompletionException.
-        assertTrue(DiscordHttp.isConnectionFailure(new CompletionException(new ConnectException("refused"))));
+        assertTrue(noIdQueueable(new CompletionException(new ConnectException("refused"))));
     }
 
     @Test
     void doesNotEnqueueAmbiguousReadFailuresOrNull() {
         // A read timeout / reset may already have delivered — enqueuing would risk a duplicate, so drop.
-        assertFalse(DiscordHttp.isConnectionFailure(new HttpTimeoutException("read timed out")));
-        assertFalse(DiscordHttp.isConnectionFailure(new CompletionException(new HttpTimeoutException("read"))));
-        assertFalse(DiscordHttp.isConnectionFailure(new IOException("connection reset")));
-        assertFalse(DiscordHttp.isConnectionFailure(null));
+        assertFalse(noIdQueueable(new HttpTimeoutException("read timed out")));
+        assertFalse(noIdQueueable(new CompletionException(new HttpTimeoutException("read"))));
+        assertFalse(noIdQueueable(new IOException("connection reset")));
+        assertFalse(noIdQueueable(null));
     }
 
     // --- Retry-After parsing ----------------------------------------------
@@ -156,5 +156,29 @@ class DiscordHttpRetryTest {
     private static void assertInRange(long actual, long lowInclusive, long highExclusive) {
         assertTrue(actual >= lowInclusive && actual < highExclusive,
                 actual + " not in [" + lowInclusive + ", " + highExclusive + ")");
+    }
+
+    /** The queue rule for a post with no relay post id: provably-pre-send failures only. */
+    private static boolean noIdQueueable(Throwable t) {
+        return DiscordHttp.isQueueableFailure(t, false);
+    }
+
+    @Test
+    void postIdMakesAmbiguousFailuresQueueable() {
+        Throwable timeout = new java.util.concurrent.CompletionException(new java.net.http.HttpTimeoutException("request timed out"));
+        Throwable reset = new java.io.IOException("Connection reset");
+        Throwable status = new java.util.concurrent.CompletionException(new DiscordHttp.RetryableStatusException(503));
+        assertTrue(DiscordHttp.isQueueableFailure(timeout, true));
+        assertTrue(DiscordHttp.isQueueableFailure(reset, true));
+        assertTrue(DiscordHttp.isQueueableFailure(status, true));
+        assertFalse(DiscordHttp.isQueueableFailure(timeout, false), "no id: a re-send could double-post");
+        assertFalse(DiscordHttp.isQueueableFailure(reset, false));
+        assertFalse(DiscordHttp.isQueueableFailure(status, false));
+    }
+
+    @Test
+    void aBugIsNeverQueued() {
+        assertFalse(DiscordHttp.isQueueableFailure(new IllegalStateException("bug"), true));
+        assertFalse(DiscordHttp.isQueueableFailure(null, true));
     }
 }

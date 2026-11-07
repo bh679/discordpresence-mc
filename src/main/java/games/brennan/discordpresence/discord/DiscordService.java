@@ -866,17 +866,15 @@ public final class DiscordService {
     /**
      * Try to deliver every queued webhook post, gated on the same enable + network-consent checks as a
      * live post: queued items are held (not sent, not dropped) while those are absent and eventually
-     * max-age evicted, so nothing is sent the user hasn't consented to. Each entry is removed only on a
-     * confirmed 2xx. Best-effort; the HTTP runs off the game thread on the shared client.
+     * max-age evicted, so nothing is sent the user hasn't consented to. Each entry is removed only once
+     * {@link DiscordWebhookClient#resendFinished} says it is done. Best-effort; the HTTP runs off the game thread on the shared client.
      */
     private void flushResendQueue() {
         MinecraftServer srv = server;
         if (srv == null || !enabled() || !networkAllowed(srv)) {
             return;
         }
-        resendQueue.flush(post ->
-                DiscordWebhookClient.resend(post.url(), post.threadId(), post.rootJson())
-                        .thenApply(ref -> ref != null));
+        resendQueue.flush(post -> DiscordWebhookClient.resend(post, resendQueue.readPhoto(post)));
     }
 
     /** Drop per-session tracking + close the gateway on server stop (the durable stores stay on disk). */
