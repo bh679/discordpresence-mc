@@ -91,6 +91,15 @@ public final class NetworkConsentScreen extends Screen {
     private static final int GAP_FOOTNOTE_ABOVE_CHOICE = 9;
     private static final int GAP_FOOTNOTE_BELOW_CHOICE = 7;
 
+    // Two-column layout, used when the provider supplies per-option bullets (see initColumns): wider card,
+    // the question under the title, the bullets in two columns, and the hovered line's tip in a fixed
+    // strip under them instead of a floating tooltip.
+    private static final int CARD_W_COLUMNS = 340;
+    private static final int COLUMN_GAP = 10;
+    private static final int GAP_QUESTION = 10;  // question buttons → columns
+    private static final int GAP_TIP = 6;        // columns → tip strip
+    private static final int TIP_LINES = 2;      // room kept for a tip that wraps in a longer language
+
     // Flat colours (no gradients).
     private static final int BACKDROP_DIM = 0x99000000;
     private static final int CARD_BG = 0xF01A1A1E;
@@ -136,6 +145,10 @@ public final class NetworkConsentScreen extends Screen {
     /** Set once {@link #choice}'s answer has been reported, so no exit path can report it twice. */
     private boolean choiceReported;
     private int choiceLabelY;
+    /** Two-column layout in use (provider per-option bullets); see {@link #initColumns}. */
+    private boolean columns;
+    private int tipY;
+    private int tipW;
 
     /**
      * One laid-out provider bullet: its wrapped lines, its marker, its hover text, and the screen rect
@@ -196,6 +209,11 @@ public final class NetworkConsentScreen extends Screen {
         // The provider's own bullets for the selected option, when it supplies them, replace BOTH of
         // the card's blocks below — that is how one line's marker and wording can differ per option.
         List<ConsentBullet> supplied = choice == null ? null : choice.bulletsFor(choiceIndex);
+        columns = supplied != null;
+        if (columns) {
+            initColumns(supplied);
+            return;
+        }
         if (supplied != null) {
             bulletBlocks = List.of();
             nonBulletBlocks = List.of();
@@ -376,6 +394,98 @@ public final class NetworkConsentScreen extends Screen {
     }
 
     /**
+     * The card when the provider supplies per-option bullets: title, the question and its option row, the
+     * bullets in two columns (the first half of the list on the left, the rest on the right, each column
+     * wrapping on its own), a strip for the hovered line's tip, then the button(s). No body line and no
+     * footnote, so a seven-line list fits a small window.
+     */
+    private void initColumns(List<ConsentBullet> supplied) {
+        panelW = Math.min(CARD_W_COLUMNS, Math.max(CARD_W, width - 16));
+        int innerWidth = panelW - 2 * PAD;
+        int colW = (innerWidth - COLUMN_GAP) / 2;
+        bodyLines = List.of();
+        bulletBlocks = List.of();
+        nonBulletBlocks = List.of();
+        footnoteLines = List.of();
+        if (toggleStatesFor != choiceIndex) {
+            toggleStates.clear();
+            toggleStatesFor = choiceIndex;
+        }
+
+        int split = (supplied.size() + 1) / 2;
+        List<List<FormattedCharSequence>> wrapped = new ArrayList<>(supplied.size());
+        int leftH = 0;
+        int rightH = 0;
+        for (int i = 0; i < supplied.size(); i++) {
+            ConsentBullet bullet = supplied.get(i);
+            int inset = bullet.isToggle() ? TOGGLE_TEXT_INSET : BULLET_TEXT_INSET;
+            List<FormattedCharSequence> lines = font.split(Component.literal(bullet.text()), colW - inset);
+            wrapped.add(lines);
+            int h = lines.size() * LINE_STEP + BULLET_GAP;
+            if (i < split) leftH += h; else rightH += h;
+        }
+        int columnsH = Math.max(0, Math.max(leftH, rightH) - BULLET_GAP);
+        int questionH = font.lineHeight + 2 + BUTTON_H;
+        int tipH = TIP_LINES * LINE_STEP;
+        int contentH = font.lineHeight + GAP_TITLE + questionH + GAP_QUESTION + columnsH
+                + GAP_TIP + tipH + GAP_BULLETS + BUTTON_H;
+        panelH = PAD + contentH + PAD;
+        panelX = (width - panelW) / 2;
+        panelY = Math.max(4, (height - panelH) / 2);
+        centerX = panelX + panelW / 2;
+        int innerLeft = panelX + PAD;
+
+        int cursor = panelY + PAD;
+        titleY = cursor;
+        cursor += font.lineHeight + GAP_TITLE;
+        choiceLabelY = cursor;
+        cursor += font.lineHeight + 2;
+        int count = choice.options().size();
+        int optionW = (innerWidth - BUTTON_GAP * (count - 1)) / count;
+        for (int i = 0; i < count; i++) {
+            int w = (i == count - 1) ? innerWidth - (optionW + BUTTON_GAP) * i : optionW;
+            addRenderableWidget(new OptionButton(innerLeft + (optionW + BUTTON_GAP) * i, cursor, w, BUTTON_H,
+                    Component.literal(choice.options().get(i)), i));
+        }
+        cursor += BUTTON_H + GAP_QUESTION;
+
+        List<LaidOutBullet> laid = new ArrayList<>();
+        int leftY = cursor;
+        int rightY = cursor;
+        int rightX = innerLeft + colW + COLUMN_GAP;
+        for (int i = 0; i < supplied.size(); i++) {
+            ConsentBullet bullet = supplied.get(i);
+            List<FormattedCharSequence> lines = wrapped.get(i);
+            int h = lines.size() * LINE_STEP;
+            boolean on = bullet.isToggle() ? toggleStates.getOrDefault(i, bullet.on()) : bullet.on();
+            boolean left = i < split;
+            laid.add(new LaidOutBullet(lines, on, bullet.tooltipFor(on),
+                    left ? innerLeft : rightX, left ? leftY : rightY, colW, h, i, bullet.onToggle()));
+            if (left) leftY += h + BULLET_GAP; else rightY += h + BULLET_GAP;
+        }
+        optionBullets = List.copyOf(laid);
+        optionBulletsFor = choiceIndex;
+        cursor += columnsH + GAP_TIP;
+        tipY = cursor;
+        tipW = innerWidth;
+        cursor += tipH + GAP_BULLETS;
+
+        if (choice.hasConfirmLabel()) {
+            addRenderableWidget(Button.builder(Component.literal(choice.confirmLabel()), b -> answer(Consent.GRANTED))
+                    .bounds(innerLeft, cursor, innerWidth, BUTTON_H)
+                    .build());
+        } else {
+            int buttonW = (innerWidth - BUTTON_GAP) / 2;
+            addRenderableWidget(Button.builder(Component.translatable(KEY_ENABLE), b -> answer(Consent.GRANTED))
+                    .bounds(innerLeft, cursor, buttonW, BUTTON_H)
+                    .build());
+            addRenderableWidget(Button.builder(Component.translatable(KEY_NOT_NOW), b -> answer(Consent.DENIED))
+                    .bounds(innerLeft + buttonW + BUTTON_GAP, cursor, innerWidth - buttonW - BUTTON_GAP, BUTTON_H)
+                    .build());
+        }
+    }
+
+    /**
      * The player picked a different option. When the provider supplies per-option bullets the whole
      * card can change height — different lines, different wrapping — so the layout is rebuilt rather
      * than patched. {@link #init} preserves {@link #choiceIndex} across the rebuild.
@@ -490,18 +600,19 @@ public final class NetworkConsentScreen extends Screen {
         String hovered = null;
         for (LaidOutBullet bullet : optionBullets) {
             int ly = bullet.y();
+            int bx = bullet.x(); // the column's left edge (the card's inner left in the one-column layout)
             int textInset = BULLET_TEXT_INSET;
             if (bullet.isToggle()) {
-                drawTogglePill(graphics, innerLeft, ly, bullet.on());
+                drawTogglePill(graphics, bx, ly, bullet.on());
                 textInset = TOGGLE_TEXT_INSET;
             } else if (bullet.on()) {
                 int dotY = ly + (font.lineHeight - 3) / 2;
-                graphics.fill(innerLeft + DOT_INSET, dotY, innerLeft + DOT_INSET + 3, dotY + 3, COLOR_DOT);
+                graphics.fill(bx + DOT_INSET, dotY, bx + DOT_INSET + 3, dotY + 3, COLOR_DOT);
             } else {
-                graphics.drawString(font, Component.literal("✗"), innerLeft + DOT_INSET - 1, ly, COLOR_NEG, false);
+                graphics.drawString(font, Component.literal("✗"), bx + DOT_INSET - 1, ly, COLOR_NEG, false);
             }
             for (FormattedCharSequence line : bullet.lines()) {
-                graphics.drawString(font, line, innerLeft + textInset, ly, COLOR_BULLET, false);
+                graphics.drawString(font, line, bx + textInset, ly, COLOR_BULLET, false);
                 ly += LINE_STEP;
             }
             // These are drawn strings, not widgets, so the hover is a manual hit-test against the rect
@@ -523,7 +634,15 @@ public final class NetworkConsentScreen extends Screen {
             graphics.drawString(font, Component.literal(choice.label()), innerLeft, choiceLabelY, COLOR_BODY, false);
         }
 
-        if (hovered != null) {
+        if (hovered != null && columns) {
+            // The two-column card shows the hovered line's tip in its own strip, centred, at most TIP_LINES.
+            int ty = tipY;
+            List<FormattedCharSequence> tip = font.split(Component.literal(hovered), tipW);
+            for (int i = 0; i < Math.min(TIP_LINES, tip.size()); i++) {
+                graphics.drawCenteredString(font, tip.get(i), centerX, ty, COLOR_BODY);
+                ty += LINE_STEP;
+            }
+        } else if (hovered != null) {
             graphics.renderTooltip(font, font.split(Component.literal(hovered), 200), mouseX, mouseY);
         }
     }
